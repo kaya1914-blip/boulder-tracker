@@ -544,13 +544,32 @@ function tmLabel(tm) {
   return `${tm.work}초×${(tm.reps || 1) * (tm.sets || 1)}`;
 }
 
+// 일요일 준비·장보기 목록 (사용자가 고칠 수 있음)
+function prepLists() {
+  if (!state.prepList) state.prepList = {
+    todo: PLAN.sundayPrep.map(it => ({ id: it.id, t: it.t })),
+    shop: PLAN.shopping.replace(/\s*\(.*\)\s*$/, '').split('·').map((t, i) => ({ id: 's' + i, t: t.trim() })).filter(it => it.t),
+  };
+  return state.prepList;
+}
+function prepRows(date, kind, list, p, edit) {
+  if (edit) return `<ul class="pedit">${list.map((it, i) => `<li>
+      <input type="text" value="${esc(it.t)}" data-field="prep:${kind}:${i}" aria-label="${kind === 'todo' ? '할 일' : '장보기'} ${i + 1}">
+      <button class="q-btn" data-act="prep-move" data-kind="${kind}" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로">${ic('chevL')}</button>
+      <button class="q-btn" data-act="prep-del" data-kind="${kind}" data-i="${i}" aria-label="지우기">${ic('close')}</button>
+    </li>`).join('')}
+    <li class="padd"><input type="text" id="padd-${kind}" placeholder="${kind === 'todo' ? '할 일 추가 (예: 도시락 통 씻기)' : '살 것 추가 (예: 그릭요거트 2)'}"><button class="sa-btn" data-act="prep-add" data-kind="${kind}">${ic('plus')}추가</button></li></ul>`;
+  return `<ul class="timeline compact">${list.map(it => `<li class="${p[it.id] ? 'on' : ''}"><button class="tl-main" data-act="prep" data-date="${date}" data-id="${it.id}" aria-pressed="${!!p[it.id]}"><span class="tl-dot">${p[it.id] ? ic('check') : ''}</span><span class="tl-txt"><b>${esc(it.t)}</b></span></button></li>`).join('')}</ul>`;
+}
 function prepCard(date) {
-  const x = day(date), p = x.prep || {};
-  const n = PLAN.sundayPrep.filter(it => p[it.id]).length;
-  return `<section class="card">
-    <div class="card-h"><h2>일요일 준비 20분</h2><span class="muted">${n}/${PLAN.sundayPrep.length}</span></div>
-    <ul class="timeline compact">${PLAN.sundayPrep.map(it => `<li class="${p[it.id] ? 'on' : ''}"><button class="tl-main" data-act="prep" data-date="${date}" data-id="${it.id}" aria-pressed="${!!p[it.id]}"><span class="tl-dot">${p[it.id] ? ic('check') : ''}</span><span class="tl-txt"><b>${it.t}</b></span></button></li>`).join('')}</ul>
-    <p class="hint">장보기 · ${PLAN.shopping}</p>
+  const x = day(date), p = x.prep || {}, L = prepLists(), edit = !!ui.prepEdit;
+  const n = L.todo.filter(it => p[it.id]).length, m = L.shop.filter(it => p[it.id]).length;
+  return `<section class="card" id="prep">
+    <div class="card-h"><h2>일요일 준비</h2><span class="ph-r">${edit ? '' : `<span class="muted">${n}/${L.todo.length}</span>`}<button class="sa-btn ${edit ? 'fold' : ''}" data-act="prep-edit">${ic(edit ? 'check' : 'swap')}${edit ? '완료' : '편집'}</button></span></div>
+    ${prepRows(date, 'todo', L.todo, p, edit)}
+    <h3 class="h3">장보기 ${edit ? '' : `<span class="muted">${m}/${L.shop.length}</span>`}</h3>
+    ${prepRows(date, 'shop', L.shop, p, edit)}
+    ${edit ? `<button class="sa-btn ghost" data-act="prep-reset">처음 목록으로 되돌리기</button>` : ''}
   </section>`;
 }
 
@@ -883,6 +902,20 @@ document.addEventListener('click', e => {
       if (navigator.vibrate) try { navigator.vibrate(30); } catch (err) { /* 미지원 */ }
       return commit();
     }
+    case 'prep-edit': ui.prepEdit = !ui.prepEdit; return render();
+    case 'prep-add': {
+      const k = b.dataset.kind, inp = document.getElementById('padd-' + k), t = inp && inp.value.trim();
+      if (!t) { toast('내용을 입력해 주세요'); return; }
+      prepLists()[k].push({ id: k[0] + Date.now().toString(36), t });
+      return commit();
+    }
+    case 'prep-del': { prepLists()[b.dataset.kind].splice(+b.dataset.i, 1); return commit(); }
+    case 'prep-move': {
+      const l = prepLists()[b.dataset.kind], i = +b.dataset.i, j = i + +b.dataset.d;
+      if (j < 0 || j >= l.length) return;
+      [l[i], l[j]] = [l[j], l[i]]; return commit();
+    }
+    case 'prep-reset': if (confirm('일요일 준비·장보기 목록을 처음 상태로 되돌릴까요?')) { delete state.prepList; return commit(); } return;
     case 'prep': { const x = dayW(d); x.prep = x.prep || {}; x.prep[b.dataset.id] = !x.prep[b.dataset.id]; return commit(); }
     case 'time': dayW(d).time = b.dataset.v; return commit();
     case 'flag': { const x = dayW(d); x[b.dataset.k] = !x[b.dataset.k]; return commit(); }
@@ -923,6 +956,11 @@ document.addEventListener('change', e => {
     return commit();
   }
   if (f.startsWith('t:')) return; // 타이머 설정은 timer.js가 처리
+  if (f.startsWith('prep:')) {
+    const [, kind, i] = f.split(':'), t = el.value.trim();
+    if (t) prepLists()[kind][+i].t = t; else prepLists()[kind].splice(+i, 1);
+    return commit();
+  }
   const x = dayW(el.dataset.date);
   if (f === 'session' && x.session !== el.value) x.checks = {};
   if (el.type === 'number') {

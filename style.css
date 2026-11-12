@@ -584,3 +584,28 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .cu-save { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); margin: 2px 0 10px; }
 .cu-save input { width: 18px; height: 18px; accent-color: var(--accent); }
 .btn.wide { width: 100%; }
+
+/* 접힌 끼니 */
+.slot-min { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; background: var(--surface-2); border: 1px solid transparent; }
+.sm-l { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sm-l b { font-size: 14.5px; font-weight: 800; }
+.sm-l small { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sm-r { flex: none; text-align: right; display: flex; flex-direction: column; line-height: 1.15; }
+.sm-r b { font-family: var(--num); font-size: 18px; font-weight: 700; }
+.sm-r small { font-size: 11px; color: var(--lime-t); font-weight: 700; }
+.sm-chev { flex: none; color: var(--muted); display: grid; }
+.sm-chev .ic { width: 16px; height: 16px; transform: rotate(90deg); }
+.sa-btn.fold { margin-left: auto; background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.sh-btns { display: flex; align-items: center; gap: 8px; }
+.sh-done { display: inline-flex; align-items: center; gap: 5px; }
+.sh-done .ic { width: 15px; height: 15px; stroke-width: 2.6; }
+
+/* 일요일 준비 편집 */
+.ph-r { display: flex; align-items: center; gap: 8px; }
+.pedit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pedit li { display: flex; align-items: center; gap: 6px; }
+.pedit input { flex: 1; min-width: 0; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 10px; padding: 9px 10px; font-size: 15px; }
+.pedit .q-btn:disabled { opacity: .3; }
+.pedit .q-btn .ic[viewBox] { transform: rotate(90deg); }
+.pedit li.padd input { border-style: dashed; background: transparent; }
+#prep .h3 { display: flex; gap: 8px; align-items: baseline; }

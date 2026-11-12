@@ -84,9 +84,18 @@ function dietCard(date) {
     <p class="hint">칼로리는 음식 DB의 대략치입니다. 피할 것 · ${PLAN.avoid}</p>
   </section>`;
 }
+const openSlots = () => (ui.openSlots = ui.openSlots || new Set());
 function slotBlock(date, sl, items) {
   const t = sumItems(items), sg = sumItems(sugItems(sl.sug));
   const sugText = sl.sug.map(([f, q]) => `${foodOf({ f }).n.replace(/ \(.*\)$/, '')} ${qtyText(q)}`).join(' + ');
+  const key = date + ':' + sl.id, open = openSlots().has(key);
+  if (items.length && !open) {
+    const names = items.map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')}${it.q !== 1 ? ' ' + qtyText(it.q) : ''}`).join(' · ');
+    return `<button class="slot slot-min" data-act="f-toggle" data-key="${key}" aria-expanded="false" aria-label="${sl.t} 펼쳐서 고치기">
+      <span class="sm-l"><b>${sl.t}</b><small>${esc(names)}</small></span>
+      <span class="sm-r"><b>${Math.round(t.k)}</b><small>kcal · ${Math.round(t.p)}g</small></span>
+      <span class="sm-chev">${ic('chevR')}</span></button>`;
+  }
   return `<div class="slot ${items.length ? 'has' : ''}">
     <div class="slot-h"><b>${sl.t}</b>${items.length ? `<span class="slot-sum">${Math.round(t.k)}kcal · ${Math.round(t.p)}g</span>` : ''}</div>
     ${items.length ? `<ul class="fitems">${items.map((it, i) => {
@@ -102,7 +111,7 @@ function slotBlock(date, sl, items) {
     <div class="slot-act">
       <button class="sa-btn" data-act="f-open" data-date="${date}" data-slot="${sl.id}">${ic('plus')}음식 추가</button>
       ${sl.id === 'd' ? `<button class="sa-btn" data-act="f-dinners" data-date="${date}">${ic('food')}추천 메뉴 보기</button>` : ''}
-      ${items.length ? `<button class="sa-btn ghost" data-act="f-clear" data-date="${date}" data-slot="${sl.id}">비우기</button>` : ''}
+      ${items.length ? `<button class="sa-btn ghost" data-act="f-clear" data-date="${date}" data-slot="${sl.id}">비우기</button><button class="sa-btn fold" data-act="f-toggle" data-key="${key}" aria-expanded="true">${ic('check')}접기</button>` : ''}
     </div>
   </div>`;
 }
@@ -158,7 +167,7 @@ function renderSheet() {
   const cats = ['자주', ...FOOD_CATS, '내 음식'];
   el.innerHTML = `<div class="sh-back" data-act="sheet-close"></div><div class="sh-panel" role="dialog" aria-label="${esc(slotName)}에 음식 추가">
     <div class="sh-grab"></div>
-    <div class="sh-h"><h3>${esc(slotName)}<small>에 추가</small></h3><button class="sh-done" data-act="sheet-close">완료</button></div>
+    <div class="sh-h"><h3>${esc(slotName)}<small>에 추가</small></h3><span class="sh-btns"><button class="sh-done" data-act="sheet-close">${ic('check')}완료</button><button class="sh-x" data-act="sheet-close" aria-label="닫기">${ic('close')}</button></span></div>
     <label class="search">${ic('target')}<input id="fSearch" type="search" placeholder="음식 검색 (예: 계란, 김밥)" value="${esc(sh.q || '')}" autocomplete="off"></label>
     <div class="cats">${cats.map(c => `<button class="${!sh.q && sh.cat === c ? 'on' : ''}" data-act="f-cat" data-c="${c}">${c === '자주' ? '자주 먹는' : c}</button>`).join('')}</div>
     <div class="sh-list" id="fList">${sheetList()}</div>
@@ -177,7 +186,9 @@ function renderSheet() {
 }
 function openSheet(s) { ui.sheet = s; document.body.classList.add('lock'); renderSheet(); }
 function closeSheet() {
+  if (ui.sheet && ui.sheet.slot) openSlots().delete(ui.sheet.date + ':' + ui.sheet.slot); // 다 고르면 그 끼니는 접힘
   ui.sheet = null;
+  render();
   if (ui.focus == null && !(typeof RUN !== 'undefined' && RUN.on)) document.body.classList.remove('lock');
   renderSheet();
 }
@@ -193,6 +204,7 @@ document.addEventListener('click', e => {
   const slotItems = (date, slot) => { const x = dayW(date); x.food = x.food || {}; return (x.food[slot] = x.food[slot] || []); };
   switch (a) {
     case 'sheet-close': return closeSheet();
+    case 'f-toggle': { const k = b.dataset.key, o = openSlots(); o.has(k) ? o.delete(k) : o.add(k); return render(); }
     case 'f-sug': {
       const sl = slotsFor(d).find(s => s.id === b.dataset.slot);
       dayW(d).food = Object.assign(day(d).food || {}, { [sl.id]: sugItems(sl.sug) });
@@ -208,7 +220,7 @@ document.addEventListener('click', e => {
       if (!list.length) delete dayW(d).food[b.dataset.slot];
       return commit();
     }
-    case 'f-open': return openSheet({ mode: 'food', date: d, slot: b.dataset.slot, cat: '자주', q: '' });
+    case 'f-open': openSlots().add(d + ':' + b.dataset.slot); return openSheet({ mode: 'food', date: d, slot: b.dataset.slot, cat: '자주', q: '' });
     case 'f-dinners': return openSheet({ mode: 'dinner', date: d, slot: 'd' });
     case 'f-cat': ui.sheet.cat = b.dataset.c; ui.sheet.q = ''; return renderSheet();
     case 'f-add': {
