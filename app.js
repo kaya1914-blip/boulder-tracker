@@ -1000,9 +1000,18 @@ function importData(file) {
   const r = new FileReader();
   r.onload = () => {
     try {
-      const s = normalize(JSON.parse(r.result));
+      const raw = JSON.parse(r.result);
+      // 일부 기록 파일(partial): 지금 기록은 그대로 두고 그 날짜만 합칩니다
+      if (raw && raw.partial && raw.days && typeof raw.days === 'object') {
+        const ds = Object.keys(raw.days).sort();
+        if (!confirm(`${ds.map(md).join(', ')} 기록을 추가합니다. 다른 날 기록은 그대로 둡니다. 계속할까요?`)) return;
+        ds.forEach(d => { state.days[d] = Object.assign(state.days[d] || {}, raw.days[d]); });
+        commit(); toast('기록을 추가했습니다');
+        return;
+      }
+      const s = normalize(raw);
       if (!s) throw new Error('형식');
-      if (!confirm(`기록 ${Object.keys(s.days).length}일치를 불러옵니다. 지금 기록은 덮어씁니다. 계속할까요?`)) return;
+      if (!confirm(`백업에서 기록 ${Object.keys(s.days).length}일치를 불러옵니다. 지금 기록은 백업 내용으로 바뀝니다. 계속할까요?`)) return;
       state = s; applyTheme(); commit(); toast('불러왔습니다');
     } catch (e) { toast('이 파일은 트래커 백업이 아닙니다'); }
   };
