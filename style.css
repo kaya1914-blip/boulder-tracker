@@ -25,9 +25,9 @@
   --lime-t: #C8F23C;
   --amber-t: #FFB547;
   --green-t: #3DDC97;
-  --glass: var(--glass);
-  --tabbar: var(--tabbar);
-  --runner-bg: var(--runner-bg);
+  --glass: rgba(255, 255, 255, .07);
+  --tabbar: rgba(12, 13, 16, .88);
+  --runner-bg: #07080A; --runner-glass: rgba(7, 8, 10, .86);
   --ph-work: #C8F23C; --ph-rest: #4DA8FF; --ph-set: #A08BFF; --ph-prep: #FFB547;
   --shadow: none;
   --r: 18px;
@@ -42,7 +42,7 @@
     --accent: #F05A1A; --accent-ink: #FFFFFF;
     --high: #EA5A1E; --mid: #0EA192; --low: #5E9E14; --rest: #7A828F;
     --lime-t: #4F7F00; --amber-t: #9A5700; --green-t: #0B8A55; --green: #12B76A; --blue: #1E7FD6; --violet: #6B4FE0; --red: #E0294A;
-    --glass: rgba(17, 19, 23, .06); --tabbar: rgba(255, 255, 255, .9); --runner-bg: #F6F7F9;
+    --glass: rgba(17, 19, 23, .06); --tabbar: rgba(255, 255, 255, .9); --runner-bg: #F6F7F9; --runner-glass: rgba(246, 247, 249, .88);
     --ph-work: #5E9E00; --ph-rest: #1E7FD6; --ph-set: #6B4FE0; --ph-prep: #D97800;
     --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
     color-scheme: light;
@@ -54,7 +54,7 @@
   --accent: #F05A1A; --accent-ink: #FFFFFF;
   --high: #EA5A1E; --mid: #0EA192; --low: #5E9E14; --rest: #7A828F;
   --lime-t: #4F7F00; --amber-t: #9A5700; --green-t: #0B8A55; --green: #12B76A; --blue: #1E7FD6; --violet: #6B4FE0; --red: #E0294A;
-  --glass: rgba(17, 19, 23, .06); --tabbar: rgba(255, 255, 255, .9); --runner-bg: #F6F7F9;
+  --glass: rgba(17, 19, 23, .06); --tabbar: rgba(255, 255, 255, .9); --runner-bg: #F6F7F9; --runner-glass: rgba(246, 247, 249, .88);
   --ph-work: #5E9E00; --ph-rest: #1E7FD6; --ph-set: #6B4FE0; --ph-prep: #D97800;
   --shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
   color-scheme: light;
@@ -414,7 +414,13 @@ th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 .f-metrics { width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; margin-top: 8px; }
 
 /* 타이머 실행 화면 */
-.runner { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; padding: calc(12px + env(safe-area-inset-top)) 20px calc(22px + env(safe-area-inset-bottom)); --pc: var(--ph-prep); background: radial-gradient(90% 55% at 50% 42%, color-mix(in srgb, var(--pc) 30%, transparent), transparent 70%), var(--runner-bg); transition: background .4s; overflow-x: hidden; overflow-y: auto; }
+.runner { position: fixed; inset: 0; z-index: 60; isolation: isolate; display: flex; flex-direction: column; align-items: center; padding: calc(12px + env(safe-area-inset-top)) 20px calc(22px + env(safe-area-inset-bottom)); --pc: var(--ph-prep); background-color: var(--runner-glass); -webkit-backdrop-filter: blur(22px) saturate(1.2); backdrop-filter: blur(22px) saturate(1.2); overflow-x: hidden; overflow-y: auto; }
+.runner::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(90% 55% at 50% 42%, var(--pc), transparent 70%); opacity: .28; transition: opacity .4s; }
+.runner.flash::after { content: ''; position: absolute; inset: 0; z-index: 5; pointer-events: none; background: var(--pc); animation: flash .9s ease-out; }
+@keyframes flash { 0% { opacity: .75; } 100% { opacity: 0; } }
+.runner.alarm .r-badge, .runner.alarm .r-num { animation: pulse .6s ease-in-out infinite alternate; }
+@keyframes pulse { to { transform: scale(1.08); } }
+.alarm-stop { margin-top: 6px; border: 0; border-radius: 999px; padding: 12px 22px; font-weight: 800; font-size: 15px; background: var(--pc); color: #0B0B0C; }
 .runner.ph-work { --pc: var(--ph-work); }
 .runner.ph-rest { --pc: var(--ph-rest); }
 .runner.ph-setrest { --pc: var(--ph-set); }

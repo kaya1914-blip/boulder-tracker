@@ -10,7 +10,9 @@ function T() {
   if (!t.hang) { t.hang = hangTodayCfg(todayStr()); t.hangPreset = 'today'; }
   if (!t.interval) { t.interval = Object.assign({}, PLAN.intervalPresets[0].cfg); t.intPreset = PLAN.intervalPresets[0].id; }
   if (!isNum(t.rest)) t.rest = 180;
-  ['sound', 'voice', 'vibrate'].forEach(k => { if (t[k] === undefined) t[k] = true; });
+  ['sound', 'voice', 'vibrate', 'flash'].forEach(k => { if (t[k] === undefined) t[k] = true; });
+  if (!t.vol) t.vol = 'loud';
+  if (!t.endAlert) t.endAlert = 'repeat';
   fixGrips(t.hang);
   return t;
 }
@@ -63,8 +65,11 @@ function unlockAudio() {
 function beep(freq, dur, vol = 0.25) {
   if (!T().sound || !actx) return;
   try {
+    const loud = T().vol === 'loud';
+    if (loud) vol = Math.min(0.9, vol * 2.4);
     const o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime;
-    o.type = 'sine'; o.frequency.value = freq;
+    o.type = loud ? 'square' : 'sine'; o.frequency.value = freq;
+    if (loud) vol *= 0.45; // 사각파는 같은 크기에서 더 크게 들림
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
@@ -82,6 +87,21 @@ function say(text) {
   } catch (e) { /* 음성 미지원 */ }
 }
 function buzz(p) { if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; if (T().vibrate && navigator.vibrate) try { navigator.vibrate(p); } catch (e) { /* 미지원 */ } }
+// 휴식이 끝날 때(= 다시 운동할 때) 크게 알림
+function chime() { beep(1046, 0.16, 0.35); setTimeout(() => beep(1046, 0.16, 0.35), 200); setTimeout(() => beep(1568, 0.45, 0.4), 400); }
+function flashScreen() {
+  if (!T().flash) return;
+  const el = document.getElementById('runner');
+  if (!el) return;
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+}
+function endAlarm(times) {
+  chime(); flashScreen(); buzz([400, 150, 400, 150, 600]);
+  let n = 1;
+  clearInterval(RUN.alarm);
+  if (times > 1) RUN.alarm = setInterval(() => { if (n++ >= times) return clearInterval(RUN.alarm); chime(); flashScreen(); buzz([400, 150, 400]); }, 1100);
+}
+function stopAlarm() { clearInterval(RUN.alarm); RUN.alarm = null; const el = document.getElementById('runner'); if (el) el.classList.remove('alarm'); }
 let wake = null;
 async function keepAwake() {
   try { if ('wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch (e) { wake = null; }
@@ -117,6 +137,9 @@ function beginPhase(at) {
   setText('rNext', nx ? `다음 · ${phaseName(nx, c)[1]} ${durText(nx.d)}` : single ? '' : '마지막');
   document.getElementById('rPlus').hidden = p.t === 'work' || p.t === 'prep';
   // 신호
+  const prev = RUN.phases[RUN.i - 1];
+  if (prev && (prev.t === 'rest' || prev.t === 'setrest') && p.t === 'work' && prev.d >= 20) { endAlarm(T().endAlert === 'repeat' ? 2 : 1); }
+  else if (RUN.i > 0) flashScreen();
   if (p.t === 'work') { beep(1046, 0.4, 0.35); buzz(250); say(c.kind === 'hang' ? '매달려' : '시작'); }
   else if (p.t === 'rest') { beep(587, 0.3); buzz([80, 60, 80]); if (p.d >= 5 || c.kind === 'rest') say('휴식'); }
   else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${c.kind === 'hang' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`); }
@@ -148,6 +171,7 @@ function tick() {
     setText('rNum', p.d >= 60 && sec >= 60 ? mmss(sec) : String(Math.max(0, sec)));
     document.getElementById('rNum').classList.toggle('long', p.d >= 60 && sec >= 60);
     setText('rTotal', mmss(remainingTotal(now)));
+    if (!RUN.paused && sec === 10 && p.d >= 30 && p.t !== 'work') say('10초 남았어요');
     if (!RUN.paused && sec <= 3 && sec > 0 && p.d > 3) { beep(880, 0.09); if (sec === 3 && RUN.phases[RUN.i + 1] && RUN.phases[RUN.i + 1].t === 'work' && p.t !== 'prep') say('셋'); }
   }
   const arc = document.getElementById('rArc');
@@ -205,7 +229,11 @@ function finishRun(stopped) {
   RUN.done = true;
   releaseAwake();
   const c = RUN.cfg;
-  if (!stopped) { beep(1046, 0.15, 0.35); setTimeout(() => beep(1046, 0.15, 0.35), 220); setTimeout(() => beep(1318, 0.5, 0.35), 440); buzz([200, 100, 200, 100, 400]); say('완료. 수고했어요'); }
+  if (!stopped) {
+    const rep = T().endAlert === 'repeat';
+    endAlarm(rep ? 8 : 1);
+    say(c.kind === 'rest' ? '휴식 끝. 다시 시작하세요' : '완료. 수고했어요');
+  }
   const setsDone = new Set(RUN.work.filter(p => p.rep === c.reps).map(p => p.set)).size;
   const hangSec = RUN.work.reduce((a, p) => a + p.d, 0);
   let saved = '';
@@ -235,12 +263,14 @@ function finishRun(stopped) {
         <div><b>${hangSec}<small>초</small></b><span>${c.kind === 'hang' ? '매달린 시간' : '운동 시간'}</span></div>`}
       </div>
       ${saved ? `<p class="r-saved">${ic('check')}${saved}</p>` : ''}
+      ${!stopped && T().endAlert === 'repeat' ? `<button class="alarm-stop" data-act="r-alarm-stop">알림 끄기</button>` : ''}
       <button class="btn-xl" data-act="r-close">닫기</button>
       ${stopped ? '' : `<button class="r-again" data-act="r-again">${ic('swap')}한 번 더</button>`}
     </div>`;
   if (typeof render === 'function') { const keep = ui.focus; render(); ui.focus = keep; renderFocus(); }
 }
 function closeRunner() {
+  stopAlarm();
   RUN = { on: false };
   releaseAwake();
   try { speechSynthesis.cancel(); } catch (e) { /* 무시 */ }
@@ -299,9 +329,14 @@ function viewTimer() {
       <button class="btn-start" data-act="t-start">${ic('play', 'fill')}<span>시작</span><small>${mmss(tot)}</small></button>`;
   }
   const opt = (k, l) => `<button class="chipbtn ${t[k] ? 'on' : ''}" data-act="t-opt" data-k="${k}" aria-pressed="${!!t[k]}">${l}</button>`;
+  const seg2 = (k, opts) => `<div class="seg theme-seg">${opts.map(([v, l]) => `<button class="${t[k] === v ? 'on' : ''}" data-act="t-set" data-k="${k}" data-v="${v}" aria-pressed="${t[k] === v}">${l}</button>`).join('')}</div>`;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   return appbar('<span class="eb-tag">TIMER</span> 행보드 · 휴식 · 인터벌', '타이머', null) + seg + body +
-    `<section class="card"><div class="card-h"><h2>알림</h2></div><div class="chips">${opt('sound', '소리')}${opt('voice', '음성 안내')}${opt('vibrate', '진동')}</div>
-    <p class="hint">타이머가 도는 동안 화면이 꺼지지 않게 합니다(지원 브라우저). 아이폰은 진동이 지원되지 않습니다.</p></section>`;
+    `<section class="card"><div class="card-h"><h2>알림</h2><button class="sa-btn" data-act="t-test">${ic('play', 'fill')}알림 테스트</button></div>
+      <div class="chips">${opt('sound', '소리')}${opt('voice', '음성 안내')}${opt('vibrate', '진동')}${opt('flash', '화면 깜빡임')}</div>
+      <h3 class="h3">소리 크기</h3>${seg2('vol', [['normal', '보통'], ['loud', '크게']])}
+      <h3 class="h3">끝날 때 알림</h3>${seg2('endAlert', [['once', '한 번'], ['repeat', '여러 번 반복']])}
+      <p class="hint">휴식이 끝나 다시 운동할 때와 타이머가 완전히 끝날 때 크게 알려줍니다. 휴식 10초 전에는 음성으로 미리 알려줍니다.${ios ? ' <b>아이폰:</b> 옆의 무음 스위치가 켜져 있으면 소리가 나지 않고, 진동은 브라우저에서 지원되지 않습니다. 무음을 끄고 화면 깜빡임을 켜 두세요.' : ''}</p></section>`;
 }
 VIEWS.timer = viewTimer;
 
@@ -337,6 +372,9 @@ document.addEventListener('click', e => {
     case 't-gripall': t.hang.grips = t.hang.grips.map(() => t.hang.grips[0]); return commit();
     case 't-restadj': t.rest = Math.max(15, Math.min(900, t.rest + +b.dataset.delta)); return commit();
     case 't-opt': t[b.dataset.k] = !t[b.dataset.k]; return commit();
+    case 't-set': t[b.dataset.k] = b.dataset.v; save(); render(); unlockAudio(); if (b.dataset.k === 'vol') chime(); return;
+    case 't-test': unlockAudio(); chime(); buzz([400, 150, 400, 150, 600]); say('휴식 끝. 다시 시작하세요'); toast('소리가 안 들리면 무음 모드와 볼륨을 확인하세요'); return;
+    case 'r-alarm-stop': stopAlarm(); try { speechSynthesis.cancel(); } catch (err) { /* 무시 */ } b.remove(); return;
     case 't-start': {
       const c = t.mode === 'hang' ? Object.assign({ kind: 'hang' }, t.hang) : Object.assign({ kind: 'interval', title: '인터벌' }, t.interval);
       return startRun(c);

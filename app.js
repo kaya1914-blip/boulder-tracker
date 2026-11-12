@@ -168,6 +168,11 @@ function getSteps(sid, date) {
       if (home && !rec && mode === 'sets') o.note = '세트 +1';
       else if (home && !rec && reps && mode === 'reps') o.note = '+2회';
       if (rec) o.note = '회복 주간';
+      const light = state.settings.dumbbellKg <= 6 && PLAN.lightDumbbell[sid + ':' + st.id];
+      if (light) {
+        if (light.r) o.t = `${n} ${s}×${rec ? r : light.r}`;
+        o.d = [o.d, light.tip].filter(Boolean).join(' · ');
+      }
       if (/초/.test(r)) {
         const secs = Math.max(...(r.match(/\d+/g) || ['30']).map(Number));
         o.tm = { kind: 'interval', title: n, work: secs, rest: restSec(rest) || 30, reps: 1, sets: s, setRest: restSec(rest) || 30 };
@@ -800,7 +805,7 @@ function viewSettings() {
         <label class="field"><span>1주차 시작일 (월)</span><input type="date" data-field="set:startDate" value="${st.startDate}"></label>
         <label class="field"><span>목표일</span><input type="date" data-field="set:targetDate" value="${st.targetDate}"></label>
         ${num('startWeight', '시작 체중 (kg)', 0.1)}${num('targetWeight', '목표 체중 (kg)', 0.1)}
-        ${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '과감량 기준 (kg/주)', 0.1)}
+        ${num('dumbbellKg', '집 덤벨 무게 (kg)', 0.5)}${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '과감량 기준 (kg/주)', 0.1)}
       </div>
     </section>
     <section class="card"><div class="card-h"><h2>백업</h2><span class="muted">마지막 ${lb ? md(lb) : '없음'}</span></div>
