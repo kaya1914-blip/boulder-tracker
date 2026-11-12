@@ -1,6 +1,6 @@
 // 오프라인용 서비스 워커: 온라인이면 최신 파일, 오프라인이면 저장해 둔 파일
-const CACHE = 'bt-v9';
-const FILES = ['./', './index.html', './style.css', './plan.js', './app.js', './timer.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
+const CACHE = 'bt-v10';
+const FILES = ['./', './index.html', './style.css', './plan.js', './foods.js', './app.js', './food.js', './timer.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

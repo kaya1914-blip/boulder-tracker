@@ -314,31 +314,7 @@ function verdict(mon) {
   return { cards, flags, s, p, ended };
 }
 
-// ---------- 식단 ----------
-function dinnerIdx(date) {
-  const x = day(date);
-  if (isNum(x.dinner)) return x.dinner % PLAN.dinners.length;
-  return ((diffDays(date, '2026-01-01') % PLAN.dinners.length) + PLAN.dinners.length) % PLAN.dinners.length;
-}
-function dietFor(date) {
-  const sid = sessOn(date), s = S(sid), gym = !!(s && s.gym);
-  const pf = verdict(addDays(mondayOf(date), -7)).flags;
-  const dinner = PLAN.dinners[dinnerIdx(date)];
-  let items = (gym ? PLAN.meals.gym : PLAN.meals.rest).filter(m => !(m.longOnly && s.min < 120)).map(m => Object.assign({}, m));
-  const notes = [];
-  if (gym && day(date).time === 'day') {
-    items = items.map(m => (m.id === 'l' ? Object.assign({}, PLAN.meals.dayWorkoutLunch) : m)).filter(m => m.id !== 'e');
-    notes.push('낮 운동: 점심을 운동 2시간 전에 든든하게 먹고, 운동 전 계란은 뺍니다.');
-  }
-  if (gym && pf.fast) {
-    const i = items.findIndex(m => m.id === 'n');
-    items.splice(i < 0 ? items.length - 1 : i, 0, Object.assign({}, PLAN.meals.fastLossExtra));
-    notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 전 탄수화물 추가');
-  }
-  if (!gym && pf.plateau) notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 1/3공기 더 줄이기');
-  items.forEach(m => { m.d = m.d.replace('{dinner}', dinner); });
-  return { gym, items, notes, kcalTarget: PLAN.meals.kcalTarget[gym ? 'gym' : 'rest'] };
-}
+// 식단 로직과 화면은 food.js에 있습니다.
 
 // ---------- 그래프 ----------
 function weightChart() {
@@ -568,32 +544,6 @@ function tmLabel(tm) {
   return `${tm.work}초×${(tm.reps || 1) * (tm.sets || 1)}`;
 }
 
-function dietCard(date) {
-  const dt = dietFor(date), x = day(date), meals = x.meals || {};
-  const eaten = dt.items.filter(m => meals[m.id]);
-  const kcal = eaten.reduce((a, m) => a + m.kcal, 0), prot = eaten.reduce((a, m) => a + m.p, 0);
-  const planK = dt.items.reduce((a, m) => a + m.kcal, 0);
-  const pt = PLAN.meals.proteinTarget;
-  return `<section class="card">
-    <div class="card-h"><h2>식단</h2><span class="pill ${dt.gym ? 'i-high' : 'i-rest'}">${dt.gym ? '암장 날' : '쉬는 날'} · ${dt.kcalTarget.toLocaleString()}kcal</span></div>
-    <div class="macro">
-      ${ring(prot / pt, 92, 9, 'r-prot', `<b>${prot}</b><small>/${pt}g</small>`)}
-      <div class="macro-txt"><div class="mx-k"><i class="dot prot"></i>단백질</div><div class="mx-v">${Math.max(0, pt - prot)}g 남음</div></div>
-      ${ring(kcal / planK, 92, 9, 'r-kcal', `<b>${kcal.toLocaleString()}</b><small>kcal</small>`)}
-      <div class="macro-txt"><div class="mx-k"><i class="dot kcal"></i>칼로리</div><div class="mx-v">${Math.max(0, planK - kcal).toLocaleString()} 남음</div></div>
-    </div>
-    ${sessOn(date) ? '' : '<p class="hint">세션을 고르기 전이라 쉬는 날 식단을 보여줍니다.</p>'}
-    ${dt.notes.map(n => `<p class="note">${ic('spark')}${n}</p>`).join('')}
-    <ul class="timeline">${dt.items.map(m => `<li class="${meals[m.id] ? 'on' : ''}">
-      <button class="tl-main" data-act="meal" data-date="${date}" data-id="${m.id}" aria-pressed="${!!meals[m.id]}">
-        <span class="tl-dot">${meals[m.id] ? ic('check') : ''}</span>
-        <span class="tl-txt"><b>${m.t}</b><small>${esc(m.d)}</small></span>
-        <span class="tl-num"><b>${m.kcal}</b><small>kcal</small>${m.p ? `<em>${m.p}g</em>` : ''}</span>
-      </button>${m.id === 'd' ? `<button class="tl-swap" data-act="dinner" data-date="${date}">${ic('swap')}다른 저녁 메뉴</button>` : ''}</li>`).join('')}</ul>
-    <p class="hint">피할 것 · ${PLAN.avoid}</p>
-  </section>`;
-}
-
 function prepCard(date) {
   const x = day(date), p = x.prep || {};
   const n = PLAN.sundayPrep.filter(it => p[it.id]).length;
@@ -759,7 +709,7 @@ function buildReport(mon) {
     const body = [x.finger ? '손가락 통증' : '', x.elbow ? '팔꿈치 통증' : '', x.weak ? '힘 떨어짐' : ''].filter(Boolean).join(', ') || '-';
     const climb = [isNum(x.brown) ? `갈색 ${x.brown}` : '', x.white ? `흰색 도달: ${x.white}` : '', x.hang ? `행보드 ${x.hang}` : '', x.pull ? `풀업 ${x.pull}` : '', ...(x.hangLog || []).map(l => `타이머 ${l.title} ${l.setsDone}/${l.sets}세트 ${l.work}초 ${l.board ? l.board + ' ' : ''}${l.grip || ''}${l.load ? ' ' + l.load : ''}`)].filter(Boolean).join(' · ') || '-';
     let meal = '-';
-    if (x.meals) { const dt = dietFor(d); const e = dt.items.filter(m => x.meals[m.id]); meal = `${e.length}/${dt.items.length}끼 · ${e.reduce((a, m) => a + m.kcal, 0)}kcal · 단백질 ${e.reduce((a, m) => a + m.p, 0)}g`; }
+    { const t = foodTotals(d); if (t.n) meal = `${t.n}개 음식 · ${Math.round(t.k)}kcal · 단백질 ${Math.round(t.p)}g${t.names ? ' (' + t.names + ')' : ''}`; }
     L.push(`| ${md(d)} ${DOW[dow(d)]} | ${ss ? ss.short : '-'}${ss && ss.gym && x.time === 'day' ? '(낮)' : ''} | ${stp} | ${isNum(x.weight) ? x.weight : '-'} | ${isNum(x.sleep) ? x.sleep : '-'} | ${body} | ${climb.replace(/\|/g, '/')} | ${meal} |`);
     if (x.note) L.push(`|  | 메모: ${String(x.note).replace(/\|/g, '/').replace(/\n/g, ' ')} |  |  |  |  |  |  |`);
   });
@@ -933,9 +883,7 @@ document.addEventListener('click', e => {
       if (navigator.vibrate) try { navigator.vibrate(30); } catch (err) { /* 미지원 */ }
       return commit();
     }
-    case 'meal': { const x = dayW(d); x.meals = x.meals || {}; x.meals[b.dataset.id] = !x.meals[b.dataset.id]; return commit(); }
     case 'prep': { const x = dayW(d); x.prep = x.prep || {}; x.prep[b.dataset.id] = !x.prep[b.dataset.id]; return commit(); }
-    case 'dinner': { const x = dayW(d); x.dinner = dinnerIdx(d) + 1; return commit(); }
     case 'time': dayW(d).time = b.dataset.v; return commit();
     case 'flag': { const x = dayW(d); x[b.dataset.k] = !x[b.dataset.k]; return commit(); }
     case 'adj': {
