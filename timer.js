@@ -56,14 +56,36 @@ function phaseName(p, c) {
 
 // ---------- 소리·진동·화면 ----------
 let actx = null;
+// 알림음: 짧은 틱은 Web Audio, 끝 알림은 <audio>로 재생 (안드로이드에서 미디어 음량으로 확실히 나도록)
+let chimeEl = null;
+function makeChimeUrl() {
+  const sr = 22050, notes = [[1046, 0, 0.16], [1046, 0.2, 0.16], [1568, 0.4, 0.5]], len = Math.ceil(sr * 0.95);
+  const buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, len * 2, true);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr; let x = 0;
+    notes.forEach(([f, st, d]) => { if (t >= st && t < st + d) { const e = Math.min(1, (t - st) * 200, (st + d - t) * 30); x += Math.sin(2 * Math.PI * f * t) * e; } });
+    v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x)) * 30000, true);
+  }
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
 function unlockAudio() {
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === 'suspended') actx.resume();
+    if (actx.state !== 'running') actx.resume();
   } catch (e) { actx = null; }
+  try {
+    if (!chimeEl) { chimeEl = new Audio(makeChimeUrl()); chimeEl.preload = 'auto'; }
+    // 사용자가 누른 순간에 한 번 무음으로 재생해 두면, 이후 자동 재생이 허용됩니다
+    if (!chimeEl.dataset.ok) { chimeEl.muted = true; const pr = chimeEl.play(); if (pr) pr.then(() => { if (chimeEl.muted) { chimeEl.pause(); chimeEl.currentTime = 0; chimeEl.muted = false; } chimeEl.dataset.ok = '1'; }).catch(() => { chimeEl.muted = false; }); }
+  } catch (e) { chimeEl = null; }
 }
 function beep(freq, dur, vol = 0.25) {
   if (!T().sound || !actx) return;
+  if (actx.state !== 'running') { try { actx.resume(); } catch (e) { /* 무시 */ } }
   try {
     const loud = T().vol === 'loud';
     if (loud) vol = Math.min(0.9, vol * 2.4);
@@ -88,12 +110,20 @@ function say(text) {
 }
 function buzz(p) { if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return; if (T().vibrate && navigator.vibrate) try { navigator.vibrate(p); } catch (e) { /* 미지원 */ } }
 // 휴식이 끝날 때(= 다시 운동할 때) 크게 알림
-function chime() { beep(1046, 0.16, 0.35); setTimeout(() => beep(1046, 0.16, 0.35), 200); setTimeout(() => beep(1568, 0.45, 0.4), 400); }
+function chime() {
+  if (!T().sound) return;
+  if (chimeEl) {
+    try { chimeEl.muted = false; chimeEl.volume = T().vol === 'loud' ? 1 : 0.6; chimeEl.currentTime = 0; const pr = chimeEl.play(); if (pr) pr.catch(() => chimeWeb()); return; } catch (e) { /* 아래로 */ }
+  }
+  chimeWeb();
+}
+function chimeWeb() { beep(1046, 0.16, 0.35); setTimeout(() => beep(1046, 0.16, 0.35), 200); setTimeout(() => beep(1568, 0.45, 0.4), 400); }
 function flashScreen() {
   if (!T().flash) return;
   const el = document.getElementById('runner');
   if (!el) return;
   el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  clearTimeout(flashScreen._t); flashScreen._t = setTimeout(() => el.classList.remove('flash'), 1000);
 }
 function endAlarm(times) {
   chime(); flashScreen(); buzz([400, 150, 400, 150, 600]);
@@ -107,7 +137,7 @@ async function keepAwake() {
   try { if ('wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch (e) { wake = null; }
 }
 function releaseAwake() { try { wake && wake.release(); } catch (e) { /* 무시 */ } wake = null; }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && RUN.on && !RUN.done) keepAwake(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && RUN.on && !RUN.done) { keepAwake(); if (actx && actx.state !== 'running') actx.resume().catch(() => {}); } });
 
 // ---------- 실행기 ----------
 let RUN = { on: false };
@@ -336,7 +366,7 @@ function viewTimer() {
       <div class="chips">${opt('sound', '소리')}${opt('voice', '음성 안내')}${opt('vibrate', '진동')}${opt('flash', '화면 깜빡임')}</div>
       <h3 class="h3">소리 크기</h3>${seg2('vol', [['normal', '보통'], ['loud', '크게']])}
       <h3 class="h3">끝날 때 알림</h3>${seg2('endAlert', [['once', '한 번'], ['repeat', '여러 번 반복']])}
-      <p class="hint">휴식이 끝나 다시 운동할 때와 타이머가 완전히 끝날 때 크게 알려줍니다. 휴식 10초 전에는 음성으로 미리 알려줍니다.${ios ? ' <b>아이폰:</b> 옆의 무음 스위치가 켜져 있으면 소리가 나지 않고, 진동은 브라우저에서 지원되지 않습니다. 무음을 끄고 화면 깜빡임을 켜 두세요.' : ''}</p></section>`;
+      <p class="hint">휴식이 끝나 다시 운동할 때와 타이머가 완전히 끝날 때 크게 알려줍니다. 휴식 10초 전에는 음성으로 미리 알려줍니다.${!ios ? ' <b>갤럭시:</b> 알림음은 <b>미디어 음량</b>으로 나옵니다. 볼륨 버튼을 누른 뒤 미디어 음량을 올려두세요.' : ''}${ios ? ' <b>아이폰:</b> 옆의 무음 스위치가 켜져 있으면 소리가 나지 않고, 진동은 브라우저에서 지원되지 않습니다. 무음을 끄고 화면 깜빡임을 켜 두세요.' : ''}</p></section>`;
 }
 VIEWS.timer = viewTimer;
 
@@ -373,7 +403,7 @@ document.addEventListener('click', e => {
     case 't-restadj': t.rest = Math.max(15, Math.min(900, t.rest + +b.dataset.delta)); return commit();
     case 't-opt': t[b.dataset.k] = !t[b.dataset.k]; return commit();
     case 't-set': t[b.dataset.k] = b.dataset.v; save(); render(); unlockAudio(); if (b.dataset.k === 'vol') chime(); return;
-    case 't-test': unlockAudio(); chime(); buzz([400, 150, 400, 150, 600]); say('휴식 끝. 다시 시작하세요'); toast('소리가 안 들리면 무음 모드와 볼륨을 확인하세요'); return;
+    case 't-test': unlockAudio(); chime(); buzz([400, 150, 400, 150, 600]); say('휴식 끝. 다시 시작하세요'); toast('소리가 안 들리면 폰의 미디어 음량을 올려주세요'); return;
     case 'r-alarm-stop': stopAlarm(); try { speechSynthesis.cancel(); } catch (err) { /* 무시 */ } b.remove(); return;
     case 't-start': {
       const c = t.mode === 'hang' ? Object.assign({ kind: 'hang' }, t.hang) : Object.assign({ kind: 'interval', title: '인터벌' }, t.interval);

@@ -415,7 +415,8 @@ th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 
 /* 타이머 실행 화면 */
 .runner { position: fixed; inset: 0; z-index: 60; isolation: isolate; display: flex; flex-direction: column; align-items: center; padding: calc(12px + env(safe-area-inset-top)) 20px calc(22px + env(safe-area-inset-bottom)); --pc: var(--ph-prep); background-color: var(--runner-glass); -webkit-backdrop-filter: blur(28px); backdrop-filter: blur(28px); overflow-x: hidden; overflow-y: auto; }
-.runner.flash::after { content: ''; position: absolute; inset: 0; z-index: 5; pointer-events: none; background: var(--pc); animation: flash .9s ease-out; }
+.runner::after { content: ''; position: absolute; inset: 0; z-index: 5; pointer-events: none; background: var(--pc); opacity: 0; }
+.runner.flash::after { animation: flash .9s ease-out both; }
 @keyframes flash { 0% { opacity: .75; } 100% { opacity: 0; } }
 .runner.alarm .r-badge, .runner.alarm .r-num { animation: pulse .6s ease-in-out infinite alternate; }
 @keyframes pulse { to { transform: scale(1.08); } }
