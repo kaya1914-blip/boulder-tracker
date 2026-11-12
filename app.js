@@ -80,6 +80,7 @@ const ICON = {
   battery: 'M3 8h15v8H3zM21 11v2M7 11v2',
   food: 'M7 3v7a2 2 0 0 0 4 0V3M9 12v9M17 21V3c-2 1-3 4-3 8h3',
   download: 'M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14',
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5.5M12 7.6v.1',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON[n]}"/></svg>`;
 function ring(p, size, sw, cls = '', inner = '') {
@@ -530,6 +531,7 @@ function sessionBlock(date) {
         <span class="step-no">${checks[st.id] ? ic('check') : pad(i + 1)}</span>
         <span class="st-txt"><b>${esc(st.t)}${st.note ? ` <em>${st.note}</em>` : ''}</b>${st.skip ? `<small class="skip-why">${st.skip}</small>` : st.d ? `<small>${esc(st.d)}</small>` : ''}</span>
       </button>
+      ${guideBtn(sid, st.id)}
       ${st.tm ? `<button class="step-tm" data-act="t-step" data-date="${date}" data-id="${st.id}" aria-label="${esc(st.t)} 타이머">${ic('timer')}<small>${tmLabel(st.tm)}</small></button>` : ''}
     </li>`).join('')}</ol>
     ${extra.length ? `<div class="chips">${extra.join('')}</div>` : ''}
@@ -619,6 +621,7 @@ function renderFocus() {
       <h2 class="f-name">${esc(st.t)}</h2>
       ${st.note ? `<span class="pill i-${s.intensity}">${st.note}</span>` : ''}
       ${st.skip ? `<p class="warn">${ic('alert')}${st.skip}</p>` : st.d ? `<p class="f-desc">${esc(st.d)}</p>` : ''}
+      ${guideBtn(sid, st.id, 'wide')}
       ${st.tm ? `<button class="f-timer" data-act="t-step" data-date="${d}" data-id="${st.id}">${ic('timer')}<span><b>타이머 시작</b><small>${st.tm.kind === 'rest' ? durText(st.tm.work) + ' 휴식' : st.tm.kind === 'hang' ? '행보드 · ' + (hangFor(d).short || '') : (st.tm.title || '') + ' · ' + tmLabel(st.tm)}</small></span>${ic('play', 'fill')}</button>` : ''}
     </div>
     <div class="f-ctrl">

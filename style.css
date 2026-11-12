@@ -609,3 +609,28 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .pedit .q-btn .ic[viewBox] { transform: rotate(90deg); }
 .pedit li.padd input { border-style: dashed; background: transparent; }
 #prep .h3 { display: flex; gap: 8px; align-items: baseline; }
+
+
+/* ---------- 운동 방법 가이드 ---------- */
+.g-btn { flex: none; align-self: center; width: 34px; height: 34px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; }
+.g-btn .ic { width: 20px; height: 20px; }
+.g-btn:active { background: var(--surface-2); }
+.g-btn.wide { width: auto; height: auto; align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 9px 14px; font-size: 14px; font-weight: 700; }
+.g-btn.wide .ic { width: 18px; height: 18px; color: var(--blue); }
+.guide { z-index: 50; }
+.guide .sh-h h3 { display: inline-flex; align-items: center; gap: 7px; }
+.guide .sh-h h3 .ic { color: var(--blue); width: 20px; height: 20px; }
+.gd-body { padding-bottom: 10px; }
+.gd { padding: 14px 0 6px; border-bottom: 1px solid var(--line); }
+.gd:last-child { border-bottom: 0; }
+.gd-t { font-size: 20px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+.gd-aim { font-size: 14px; color: var(--ink-2); margin: 6px 0 4px; line-height: 1.5; }
+.gd-h { font-size: 12.5px; font-weight: 800; letter-spacing: .02em; margin: 14px 0 6px; color: var(--muted); }
+.gd-h.cue { color: var(--green-t); }
+.gd-h.avoid { color: var(--amber-t); }
+.gd-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.gd-list li { position: relative; font-size: 14.5px; line-height: 1.5; padding-left: 26px; }
+.gd-list.how { counter-reset: s; }
+.gd-list.how li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 1px; width: 19px; height: 19px; border-radius: 50%; background: var(--surface-3); font-family: var(--num); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.gd-list.cue li::before, .gd-list.avoid li::before { content: ''; position: absolute; left: 7px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.gd-list.avoid li::before { background: var(--amber); }
