@@ -100,10 +100,11 @@ const GUIDE = {
     how: ['앉거나 서서 덤벨을 어깨 높이에 듭니다', '팔이 거의 다 펴질 때까지 머리 위로 밀어 올립니다', '천천히 어깨 높이로 내립니다'],
     cue: ['갈비뼈를 닫고 허리를 꺾지 않기', '2~3회 여유가 남는 무게'], avoid: ['반동으로 올리기'],
   },
-  ext_rotation: {
-    t: '사이드라잉 외회전', aim: '회전근개(어깨 속근육)를 강화해 어깨 부상을 막습니다.',
-    how: ['옆으로 누워 위쪽 팔꿈치를 옆구리에 붙이고 90° 굽힙니다', '1~3kg 덤벨을 배 앞에서 천장 쪽으로 천천히 돌려 올립니다', '천천히 내립니다. 좌우 같은 횟수'],
-    cue: ['팔꿈치를 옆구리에서 떼지 않기 (수건을 끼우면 좋음)', '아주 가벼운 무게로'], avoid: ['무거운 무게', '몸통을 같이 돌리기'],
+  t_raise: {
+    t: '엎드려 T레이즈', aim: '어깨 뒤쪽과 날개뼈 사이 근육을 길러, 당기는 운동만 해서 생기는 어깨 앞쏠림을 막습니다.',
+    how: ['바닥이나 벤치에 엎드려 이마를 수건 위에 둡니다', '팔을 양옆으로 쭉 펴 T자를 만들고 엄지는 천장을 향합니다', '날개뼈를 모으며 팔을 바닥에서 살짝 들어 1~2초 멈춥니다', '천천히 내립니다. 맨손으로 시작하고, 쉬우면 0.5~1kg'],
+    cue: ['팔 높이보다 날개뼈를 모으는 느낌이 중요', 'Y레이즈와 이어서 해도 좋습니다'],
+    avoid: ['목을 들어 올리기', '허리를 젖혀 몸통까지 들기'],
   },
   y_raise: {
     t: '엎드려 Y레이즈', aim: '날개뼈 아래쪽 근육을 강화해 어깨 자세를 바르게 합니다.',
@@ -115,10 +116,11 @@ const GUIDE = {
     how: ['손등이 위를 보게 가벼운 덤벨을 잡고, 팔뚝을 허벅지나 의자에 올립니다', '손목만 천천히 들어 올립니다', '천천히 내립니다'],
     cue: ['아주 가볍게, 천천히 (2초 올리고 2초 내리기)'], avoid: ['팔꿈치·어깨로 들기'],
   },
-  pronation: {
-    t: '덤벨 회내·회외', aim: '팔뚝을 돌리는 근육을 길러 팔꿈치 부상을 예방합니다.',
-    how: ['덤벨 한쪽 끝을 잡고 (망치처럼), 팔뚝을 의자에 고정합니다', '손바닥이 아래를 볼 때까지 천천히 돌립니다', '반대로 손바닥이 위를 볼 때까지 돌립니다'],
-    cue: ['팔꿈치는 움직이지 않기', '덤벨을 짧게 잡을수록 쉬움'], avoid: ['빠르게 휘두르기'],
+  hammer_curl: {
+    t: '덤벨 해머컬', aim: '팔꿈치 주변(전완 바깥쪽) 근육을 길러 클라이밍 엘보를 예방합니다.',
+    how: ['덤벨을 망치처럼 세워 쥐고 (손바닥이 몸 쪽) 팔을 내립니다', '팔꿈치를 옆구리에 붙인 채 덤벨을 어깨 쪽으로 들어 올립니다', '2초 동안 천천히 내립니다. 양손 동시 또는 번갈아'],
+    cue: ['2~3회 여유가 남는 무게로 가볍게', '손목은 곧게 유지'],
+    avoid: ['상체를 흔들어 반동 주기', '팔꿈치가 앞으로 나오기'],
   },
   dead_bug: {
     t: '데드버그', aim: '허리를 안정시키는 깊은 코어 근육을 기릅니다.',
@@ -167,7 +169,7 @@ const STEP_GUIDE = {
   'limit:w': 'warmup_boulder', 'limit:m': 'limit_boulder', 'limit:c': ['hanging_leg_raise', 'plank'], 'limit:x': 'cooldown',
   'strength:w': 'warmup_boulder', 'strength:h': 'hangboard', 'strength:p': 'pullup', 'strength:l': 'lockoff', 'strength:e': 'easy_climb', 'strength:x': 'cooldown',
   'volume:w': 'warmup_boulder', 'volume:b': 'volume_brown', 'volume:n': 'endurance', 'volume:x': 'cooldown',
-  'homeA:w': 'arm_warmup', 'homeA:pu': 'pushup', 'homeA:sp': 'db_press', 'homeA:er': 'ext_rotation', 'homeA:yr': 'y_raise', 'homeA:rc': 'reverse_curl', 'homeA:pr': 'pronation', 'homeA:ll': 'hanging_leg_raise',
+  'homeA:w': 'arm_warmup', 'homeA:pu': 'pushup', 'homeA:sp': 'db_press', 'homeA:er': 't_raise', 'homeA:yr': 'y_raise', 'homeA:rc': 'reverse_curl', 'homeA:pr': 'hammer_curl', 'homeA:ll': 'hanging_leg_raise',
   'homeB:db': 'dead_bug', 'homeB:sp': 'side_plank', 'homeB:hh': 'hollow_hold', 'homeB:gs': 'goblet_squat', 'homeB:st': 'hip_stretch', 'homeB:dh': 'dead_hang', 'homeB:x': 'thoracic_stretch',
   'homeC:w': 'arm_warmup', 'homeC:p': 'pullup', 'homeC:l': 'lockoff', 'homeC:ng': 'negative_pullup', 'homeC:ro': 'db_row', 'homeC:ll': 'hanging_leg_raise',
   'rest:r': 'rest_day',
