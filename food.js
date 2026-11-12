@@ -128,7 +128,7 @@ function recentFoods() {
 function sheetList() {
   const sh = ui.sheet, q = (sh.q || '').trim().replace(/\s+/g, '');
   let list;
-  if (q) list = FOODS.concat(myFoods()).filter(f => f.n.replace(/\s+/g, '').includes(q));
+  if (q) list = FOODS.concat(myFoods()).filter(f => (f.n + ' ' + (f.a || '')).replace(/\s+/g, '').includes(q));
   else if (sh.cat === '자주') { list = recentFoods(); if (!list.length) list = FOODS.filter(f => f.c === '기본'); }
   else if (sh.cat === '내 음식') list = myFoods();
   else list = FOODS.filter(f => f.c === sh.cat);
