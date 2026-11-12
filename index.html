@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>볼더링 트래커</title>
+  <meta name="description" content="볼더링 복귀 트레이닝·식단 트래커">
+  <meta name="theme-color" content="#0A0B0D">
+  <meta name="color-scheme" content="dark light">
+  <script>try{var t=JSON.parse(localStorage.getItem('bt.v1')).meta.theme;if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="볼더링">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="main" class="wrap"></main>
+  <nav class="tabbar" aria-label="화면">
+    <button data-act="tab" data-tab="today"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-4.5v-5.5h-5V21H5a1 1 0 0 1-1-1z"/></svg><span>오늘</span></button>
+    <button data-act="tab" data-tab="record"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 8h8M8 15h8M8 7h5"/></svg><span>기록</span></button>
+    <button class="tab-fab" data-act="tab" data-tab="timer" aria-label="타이머"><span class="fab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 9v4l2.5 2M9.5 2h5"/></svg></span><span>타이머</span></button>
+    <button data-act="tab" data-tab="week"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 16l4-5 3 3 5-7"/></svg><span>주간</span></button>
+    <button data-act="tab" data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm7.4-3a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14.5 3h-5l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h5l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg><span>설정</span></button>
+  </nav>
+  <div id="focus" class="focus" hidden></div>
+  <div id="runner" class="runner" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="plan.js"></script>
+  <script src="app.js"></script>
+  <script src="timer.js"></script>
+</body>
+</html>
