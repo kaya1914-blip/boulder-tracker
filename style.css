@@ -685,3 +685,8 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 /* 음식 한 번에 삭제 */
 .q-btn.del { margin-left: 4px; background: transparent; border: 1px solid var(--line-2); color: var(--muted); }
 .q-btn.del:active { color: var(--amber-t, #d97800); }
+
+/* 레벨 처방 요약 */
+.lv-who { font-style: normal; color: var(--muted); font-size: 12.5px; }
+.lv-info .plain li span { min-width: 62px; }
+.lv-info .warn { margin-top: 10px; }

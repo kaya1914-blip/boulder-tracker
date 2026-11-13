@@ -61,7 +61,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const day = s => state.days[s] || {};
 const dayW = s => (state.days[s] = state.days[s] || {});
 const sessOn = s => (state.days[s] && state.days[s].session) || null;
-const S = id => PLAN.sessions[id];
+// 세션 정보 (시간은 등급별 처방이 있으면 그 값)
+const S = id => { const x = PLAN.sessions[id]; if (!x) return x; const m = tier().min; return m && m[id] ? Object.assign({}, x, { min: m[id] }) : x; };
 const isHigh = id => !!id && S(id) && S(id).intensity === 'high';
 const slotOf = id => (id && S(id) ? S(id).slot : null);
 const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
@@ -105,7 +106,9 @@ function ring(p, size, sw, cls = '', inner = '') {
 const lvl = () => { const v = state.settings.level; return isNum(v) ? Math.max(0, Math.min(10, Math.round(v))) : PLAN.defaultLevel; };
 const lvlSet = () => isNum(state.settings.level);
 const tierIdx = () => PLAN.tierOf[lvl()];
-const tier = () => PLAN.tiers[tierIdx()];
+// 지금 레벨의 처방: 5단계 기본값 위에 등급별 값을 덮어씀
+let _tierKey = null, _tierVal = null;
+const tier = () => { const L = lvl(); if (_tierKey !== L) { _tierKey = L; _tierVal = Object.assign({}, PLAN.tiers[PLAN.tierOf[L]], PLAN.levels[L] || {}); } return _tierVal; };
 function vRange(a, b) {
   a = Math.max(0, Math.min(10, a)); b = Math.max(0, Math.min(10, b));
   return a === b ? `V${a}` : `V${a}~V${b}`;
@@ -160,7 +163,9 @@ function grades(L = lvl()) {
 function fill(str) {
   if (!str) return str;
   const g = grades(), t = tier();
-  return String(str).replace(/\{(proj|vol|easy|warm|grip|lockT|lockD)\}/g, (m, k) => (k === 'grip' ? t.grip : k === 'lockT' ? t.lock.t : k === 'lockD' ? t.lock.d : g[k]));
+  const extra = { vn1: t.vn && t.vn[0], vn2: t.vn && t.vn[1], vn3: t.vn && t.vn[2], lockT: t.lock.t, lockD: t.lock.d, hangRestT: durText(t.hangRest || 150) };
+  const one = x => String(x).replace(/\{(\w+)\}/g, (m, k) => (g[k] != null ? g[k] : extra[k] != null ? extra[k] : typeof t[k] === 'string' || typeof t[k] === 'number' ? t[k] : m));
+  return one(one(str)); // 처방 글 안에 다시 {vol} 같은 표시가 들어 있을 수 있어 두 번
 }
 
 // ---------- 몸·목표·식단 목표 ----------
@@ -262,10 +267,17 @@ function getSteps(sid, date) {
   const w = Math.max(1, weekNo(date)), cfg = weekCfg(w), mode = cfg.home, rec = !!cfg.recovery;
   const f = liveFlags(date), hang = hangFor(date), pull = pullFor(date);
   const home = sid === 'homeA' || sid === 'homeB';
-  const list = (PLAN.steps[sid] || []).map(st => {
+  const T0 = tier();
+  const list = (PLAN.steps[sid] || []).map(st0 => {
+    let st = st0;
+    if (st0.from) { // 등급별 처방에서 가져오는 단계
+      const src = T0[st0.from];
+      if (!src) return null;
+      st = Object.assign({}, st0, { t: src.t, d: src.d, deload: src.deload, tm: src.tm });
+    }
     const o = { id: st.id, tag: st.tag, tm: st.tm ? Object.assign({}, st.tm) : null };
     if (st.ex) {
-      const ex = Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {});
+      const ex = Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {}, (PLAN.levelVariants[sid + ':' + st.id] || {})[lvl()] || {});
       let { n, s, r, rest, reps, side, tip, tempo, parts } = ex;
       if (home && reps && (mode === 'reps' || mode === 'sets')) r = bump(r, 2);
       if (home && mode === 'sets') s += 1;
@@ -286,9 +298,9 @@ function getSteps(sid, date) {
       } else if (rest) o.tm = { kind: 'rest', work: restSec(rest), title: `${n} 세트 휴식` };
     } else {
       o.t = fill(st.t.replace('{pull}', pull));
-      o.d = fill(rec && st.deload ? st.deload : st.d.replace('{hang}', hang.text || ''));
+      o.d = fill(rec && st.deload ? st.deload : (st.d || '').replace('{hang}', hang.text || ''));
       if (rec && st.deload) o.note = '회복 주간';
-      if (st.t === '{lockT}') o.tm = Object.assign({}, tier().lock.tm);
+      if (st.id === 'p' && sid === 'strength' && T0.pullRest) o.tm = { kind: 'rest', work: T0.pullRest, title: '풀업 세트 휴식' };
     }
     if (st.tag === 'hang') {
       if (hang.skip) o.skip = hang.skip;
@@ -297,7 +309,7 @@ function getSteps(sid, date) {
     if (st.tag === 'pull' && f.elbow7) o.skip = '최근 7일 팔꿈치 통증 → 중단';
     if (o.skip) o.tm = null;
     return o;
-  });
+  }).filter(Boolean);
   if ((sid === 'limit' || sid === 'volume') && compensationDay(date) && !hang.skip && !f.fingerWeek) {
     list.splice(1, 0, { id: 'hc', t: '행보드 보충 3세트', d: `집 C로 대체한 근력 세션분 · ${tier().grip} · ${hang.text}`, tag: 'hang', note: '보충', tm: { kind: 'hang', sets: 3 } });
   }
@@ -485,10 +497,11 @@ function brownChart(curMon) {
   const startMon = mondayOf(state.settings.startDate);
   const n = Math.max(4, Math.min(8, weekNo(curMon)));
   const vals = Array.from({ length: n }, (_, i) => weekStats(addDays(startMon, i * 7)).brownMax);
-  const max = Math.max(10, ...vals.filter(isNum));
+  const max = Math.max(10, ((tier().vol && tier().vol.target) || 8) + 2, ...vals.filter(isNum));
   const W = 340, H = 140, L = 8, B = 22, T = 10, bw = (W - L * 2) / n;
   const Y = v => T + (1 - v / max) * (H - T - B);
-  let g = `<line x1="${L}" x2="${W - L}" y1="${Y(8)}" y2="${Y(8)}" class="c-goal"/><text x="${W - L}" y="${Y(8) - 4}" class="c-goal-lbl" text-anchor="end">목표 8</text>`;
+  const tgt = (tier().vol && tier().vol.target) || 8;
+  let g = `<line x1="${L}" x2="${W - L}" y1="${Y(tgt)}" y2="${Y(tgt)}" class="c-goal"/><text x="${W - L}" y="${Y(tgt) - 4}" class="c-goal-lbl" text-anchor="end">목표 ${tgt}</text>`;
   vals.forEach((v, i) => {
     const x = L + i * bw + bw * 0.22, w = bw * 0.56, cur = addDays(startMon, i * 7) === curMon;
     if (isNum(v)) g += `<rect x="${x}" y="${Y(v)}" width="${w}" height="${H - B - Y(v)}" rx="5" class="bar ${cur ? 'cur' : ''}"/><text x="${x + w / 2}" y="${Y(v) - 5}" class="c-val" text-anchor="middle">${v}</text>`;
@@ -559,14 +572,24 @@ function levelCard() {
     ${sysSeg}
     ${btns}
     <div class="lv-info">
-      <b>${t.range} · ${t.name}${set ? '' : ' (기본값 V' + L + ')'}</b>
-      <p>${t.sub}</p>
+      <b>V${L} · ${t.title || t.name}${set ? '' : ' (고르기 전 기본값)'}</b>
+      <p>${t.who ? `<em class="lv-who">${t.who} · ${t.name}(${t.range})</em><br>` : ''}${t.focus || t.sub}</p>
       <ul class="plain">
+        <li><span>주간</span>${t.week || ''}</li>
         <li><span>문제</span>한계 ${g.proj} · 볼륨 ${g.vol} · 워밍업 ${g.warm}</li>
-        <li><span>행보드</span>${t.grip} · ${t.hangLevels[0]} → ${t.hangLevels[4]}</li>
-        <li><span>풀업</span>${t.pull[0]} → ${t.pull[7]}</li>
-        <li><span>록오프</span>${t.lock.t}</li>
+        <li><span>한계 세션</span>${fill(t.limit.d)}</li>
+        <li><span>볼륨 세션</span>${fill(t.vol.d)} · 주차 목표 ${t.vn.join(' → ')}개</li>
+        <li><span>지구력</span>${fill(t.end.d)}</li>
+        <li><span>손가락</span>${t.grip} · ${t.hangSets}회 · 휴식 ${durText(t.hangRest)}<br>${t.hangLevels.map((h, i) => `${['1주', '2주', '3주', '5~6주', '7~8주'][i]} ${h}`).join(' → ')}</li>
+        <li><span>풀업</span>${t.pull[0]} → ${t.pull[2]} → ${t.pull[7]}<br>${t.pullD}</li>
+        <li><span>록오프</span>${t.lock.t} · ${t.lock.d}</li>
+        ${t.campus ? `<li><span>캠퍼스</span>${t.campus.d}</li>` : ''}
+        <li><span>코어</span>${t.core.d}</li>
+        ${t.drill ? `<li><span>기술</span>${t.drill.d}</li>` : ''}
+        <li><span>세션 시간</span>한계 ${minText(t.min.limit)} · 근력 ${minText(t.min.strength)} · 볼륨 ${minText(t.min.volume)}</li>
       </ul>
+      ${t.caution ? `<p class="warn">${ic('alert')}${t.caution}</p>` : ''}
+      <p class="hint">4주차는 회복 주간(양 절반·행보드 생략)입니다. 강도 기준은 RPE(힘든 정도 1~10)이고, 손가락 무게는 "10초 매달리고 3초 더 버틸 수 있는" 선입니다. 근거: Eva López 맥스행, Hörst 무게 풀업·4×4, Lattice 등급별 근력 자료. 개인차가 크니 통증이 있으면 한 등급 낮춰 진행하세요.</p>
     </div>
   </section>`;
 }
@@ -892,7 +915,7 @@ function buildReport(mon) {
   L.push('1. 이번 주 잘한 점과 문제점 (체중 추세, 세션 수행률, 강도 배치, 손가락·팔꿈치 부상 신호, 수면)');
   L.push('2. 앱의 자동 판정이 적절한지, 놓친 신호가 있는지');
   L.push('3. 다음 주 구체적 조정안 (세션 배치, 행보드·풀업 강도, 식단 칼로리·단백질)');
-  L.push(`4. 4주 목표(원데이 볼륨 ${grades().vol} 8개 이상 + ${grades().proj} 시도${weightGoal() ? `, 체중 ${st.targetWeight}kg` : ''}) 달성 가능성`);
+  L.push(`4. 4주 목표(원데이 볼륨 ${grades().vol} ${tier().vol.target}개 이상 + ${grades().proj} 시도${weightGoal() ? `, 체중 ${st.targetWeight}kg` : ''}) 달성 가능성`);
   L.push('');
   L.push('## 계획 요약');
   {
@@ -902,6 +925,7 @@ function buildReport(mon) {
     L.push(`- 식단 목표: 단백질 ${tg.protein}g/일, 암장 날 ${tg.gym}kcal · 쉬는 날 ${tg.rest}kcal${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? ' (직접 지정)' : ' (자동 계산)'}`);
   }
   L.push(`- 레벨: V${lvl()}${gradeSys() === 'v' ? '' : ` (${PLAN.gradeSystems[gradeSys()].name} ${levelName()})`} · ${tier().range} ${tier().name} · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
+  L.push(`- 등급 처방(V${lvl()} ${tier().title || ''}): 한계 세션 ${fill(tier().limit.d)} / 손가락 ${tier().grip} ${tier().hangSets}회 / 지구력 ${fill(tier().end.d)}${tier().campus ? ' / 캠퍼스 ' + tier().campus.t : ''}`);
   L.push('- 주간 묶음: 한계(고강도) · 근력(고강도, 집 C 대체 가능) · 볼륨 · 집 A · 집 B · 휴식 2. 요일 자유, 고강도 연속 금지');
   L.push(`- 이번 주 진행표: ${cfg.goal} / 행보드 ${hangFor(mon).skip ? '생략' : hangFor(mon).text} / 풀업 ${pullFor(mon)}${cfg.recovery ? ' / 회복 주간' : ''}`);
   L.push('');

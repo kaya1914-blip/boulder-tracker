@@ -27,7 +27,7 @@ function board() {
 }
 function hangTodayCfg(date, sets) {
   const h = hangFor(date), lvl = isNum(h.lvl) ? h.lvl : 0;
-  const c = { kind: 'hang', title: '행보드 · 오늘 권장', prep: 10, work: tier().hangSeconds[lvl], rest: 0, reps: 1, sets: sets || 5, setRest: 150, load: h.skip ? '' : h.short, grips: [] };
+  const c = { kind: 'hang', title: '행보드 · 오늘 권장', prep: 10, work: tier().hangSeconds[lvl], rest: 0, reps: 1, sets: sets || tier().hangSets || 5, setRest: tier().hangRest || 150, load: h.skip ? '' : h.short, grips: [] };
   fixGrips(c);
   return c;
 }
@@ -372,7 +372,7 @@ function viewTimer() {
   let body = '';
   if (t.mode === 'hang') {
     const c = t.hang, h = hangFor(todayStr());
-    const today = { id: 'today', name: '오늘 권장', sub: h.skip ? '이번 주 행보드 생략' : `${tier().hangSeconds[h.lvl]}초 × 5 · ${h.short}` };
+    const today = { id: 'today', name: '오늘 권장', sub: h.skip ? '이번 주 행보드 생략' : `${tier().hangSeconds[h.lvl]}초 × ${tier().hangSets || 5} · ${h.short}` };
     const tot = totalSec(c), hangT = c.work * c.reps * c.sets;
     body = `${h.skip ? `<p class="warn">${ic('alert')}${h.skip}. 그래도 쓰려면 강도를 낮게 잡으세요.</p>` : ''}
       ${liveFlags(todayStr()).fingerWeek ? `<p class="warn">${ic('finger')}이번 주 손가락 통증 기록이 있습니다. 행보드는 쉬는 걸 권합니다.</p>` : ''}
