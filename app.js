@@ -110,9 +110,32 @@ function vRange(a, b) {
   a = Math.max(0, Math.min(10, a)); b = Math.max(0, Math.min(10, b));
   return a === b ? `V${a}` : `V${a}~V${b}`;
 }
+// 등급 표시 기준: V 등급 · 더클라임 색 · 웨이브락 색
+const gradeSys = () => (PLAN.gradeSystems[state.settings.gradeSys] ? state.settings.gradeSys : 'v');
+const sysColors = (sys = gradeSys()) => PLAN.gradeSystems[sys].colors || null;
+function colorAt(v, sys = gradeSys()) {
+  const cs = sysColors(sys);
+  if (!cs) return null;
+  v = Math.max(0, Math.min(10, v));
+  return cs.find(c => v >= c.lo && v <= c.hi) || (v > cs[cs.length - 1].hi ? cs[cs.length - 1] : cs[0]);
+}
+const gName = v => (gradeSys() === 'v' ? `V${Math.max(0, Math.min(10, v))}` : colorAt(v).n);
+function gRange(a, b) {
+  if (gradeSys() === 'v') return vRange(a, b);
+  const na = gName(a), nb = gName(b);
+  return na === nb ? na : `${na}~${nb}`;
+}
+// 지금 고른 레벨의 이름 (색 기준이면 고른 색, 아니면 V)
+function levelName() {
+  const cs = sysColors();
+  if (!cs) return `V${lvl()}`;
+  const i = state.settings.gradeColor, c = isNum(i) && cs[i] && cs[i].lo === lvl() ? cs[i] : colorAt(lvl());
+  return c.n;
+}
 // 레벨에 맞춘 문제 등급: 한계(proj) · 볼륨(vol) · 쉬운(easy) · 워밍업(warm)
 function grades(L = lvl()) {
-  return { proj: L >= 10 ? 'V10+' : vRange(L, L + 1), vol: vRange(L - 2, L - 1), easy: vRange(L - 3, L - 2), warm: L <= 3 ? 'V0' : `V${L - 3} 이하` };
+  const top = gradeSys() === 'v' ? 'V10+' : gName(10);
+  return { proj: L >= 10 ? top : gRange(L, L + 1), vol: gRange(L - 2, L - 1), easy: gRange(L - 3, L - 2), warm: L <= 3 ? gName(0) : `${gName(L - 3)} 이하` };
 }
 function fill(str) {
   if (!str) return str;
@@ -479,8 +502,8 @@ function appbar(eyebrow, title, act, extra = '') {
 }
 function eyebrowFor(date) {
   const w = weekNo(date), cfg = weekCfg(w);
-  if (w < 1) return `<span class="eb-tag">PRE</span><span class="eb-tag lv">V${lvl()}</span> 1주차까지 ${diffDays(state.settings.startDate, date)}일`;
-  return `<span class="eb-tag">WEEK ${w}</span><span class="eb-tag lv">V${lvl()}</span>${cfg.recovery ? ' 회복 주간' : ' ' + cfg.goal}`;
+  if (w < 1) return `<span class="eb-tag">PRE</span><span class="eb-tag lv">${levelName()}</span> 1주차까지 ${diffDays(state.settings.startDate, date)}일`;
+  return `<span class="eb-tag">WEEK ${w}</span><span class="eb-tag lv">${levelName()}</span>${cfg.recovery ? ' 회복 주간' : ' ' + cfg.goal}`;
 }
 
 function goalCard(date) {
@@ -501,12 +524,20 @@ function goalCard(date) {
 }
 
 function levelCard() {
-  const L = lvl(), set = lvlSet(), t = tier(), g = grades();
-  const btns = Array.from({ length: 11 }, (_, v) => `<button class="lv-btn ${set && v === L ? 'on' : ''} t${PLAN.tierOf[v]}" data-act="level" data-v="${v}" aria-pressed="${set && v === L}">V${v}</button>`).join('');
+  const L = lvl(), set = lvlSet(), t = tier(), g = grades(), sys = gradeSys(), cs = sysColors();
+  const sysSeg = `<div class="seg theme-seg lv-sys" role="group" aria-label="등급 기준">${Object.entries(PLAN.gradeSystems).map(([k, v]) => `<button class="${sys === k ? 'on' : ''}" data-act="grade-sys" data-v="${k}" aria-pressed="${sys === k}">${v.name}</button>`).join('')}</div>`;
+  let btns;
+  if (!cs) btns = `<div class="lv-grid" role="group" aria-label="레벨 선택">${Array.from({ length: 11 }, (_, v) => `<button class="lv-btn ${set && v === L ? 'on' : ''}" data-act="level" data-v="${v}" aria-pressed="${set && v === L}">V${v}</button>`).join('')}</div>`;
+  else {
+    const curName = levelName();
+    btns = `<div class="lv-grid colors" role="group" aria-label="색 선택">${cs.map((c, i) => { const on = set && c.lo === L && c.n === curName; return `<button class="lv-btn col ${on ? 'on' : ''}" data-act="level-c" data-i="${i}" aria-pressed="${on}"><i class="sw" style="background:${c.hex}"></i><b>${c.n}</b><small>${c.hi >= 10 ? `V${c.lo}+` : vRange(c.lo, c.hi)}</small></button>`; }).join('')}</div>
+      <p class="hint">${PLAN.gradeSystems[sys].note}</p>`;
+  }
   return `<section class="card lv-card" id="level">
-    <div class="card-h"><h2>${ic('target')}내 클라이밍 레벨</h2><span class="muted">${set ? `V${L} · ${t.name}` : '아직 안 골랐어요'}</span></div>
-    <p class="hint">자연 바위 기준 V 등급에서 <b>대부분 완등할 수 있는 가장 높은 등급</b>을 고르세요. 문제 난이도, 행보드, 풀업, 록오프, 집 운동 횟수와 변형이 레벨에 맞게 바뀝니다.</p>
-    <div class="lv-grid" role="group" aria-label="레벨 선택">${btns}</div>
+    <div class="card-h"><h2>${ic('target')}내 클라이밍 레벨</h2><span class="muted">${set ? `${levelName()}${cs ? ` (V${L})` : ''} · ${t.name}` : '아직 안 골랐어요'}</span></div>
+    <p class="hint"><b>대부분 완등할 수 있는 가장 높은 등급</b>을 고르세요. 기준은 자연 바위 V 등급이나 다니는 암장 색 중 편한 쪽으로 바꿀 수 있습니다. 문제 난이도, 행보드, 풀업, 록오프, 집 운동 횟수와 변형이 레벨에 맞게 바뀝니다.</p>
+    ${sysSeg}
+    ${btns}
     <div class="lv-info">
       <b>${t.range} · ${t.name}${set ? '' : ' (기본값 V' + L + ')'}</b>
       <p>${t.sub}</p>
@@ -657,7 +688,7 @@ function tmLabel(tm) {
   return `${tm.work}초×${(tm.reps || 1) * (tm.sets || 1)}`;
 }
 
-// 일요일 준비·장보기 목록 (사용자가 고칠 수 있음)
+// 이번 주 준비·장보기 목록 (사용자가 고칠 수 있음). 체크는 주 단위로 남습니다.
 function prepLists() {
   if (!state.prepList) state.prepList = {
     todo: PLAN.sundayPrep.map(it => ({ id: it.id, t: it.t })),
@@ -674,16 +705,25 @@ function prepRows(date, kind, list, p, edit) {
     <li class="padd"><input type="text" id="padd-${kind}" placeholder="${kind === 'todo' ? '할 일 추가 (예: 도시락 통 씻기)' : '살 것 추가 (예: 그릭요거트 2)'}"><button class="sa-btn" data-act="prep-add" data-kind="${kind}">${ic('plus')}추가</button></li></ul>`;
   return `<ul class="timeline compact">${list.map(it => `<li class="${p[it.id] ? 'on' : ''}"><button class="tl-main" data-act="prep" data-date="${date}" data-id="${it.id}" aria-pressed="${!!p[it.id]}"><span class="tl-dot">${p[it.id] ? ic('check') : ''}</span><span class="tl-txt"><b>${esc(it.t)}</b></span></button></li>`).join('')}</ul>`;
 }
+// 그 주의 준비 체크 (예전 기록은 날짜별로 있어서 그 주 것을 합쳐 읽음)
+function prepChecks(date, create) {
+  const mon = mondayOf(date), w = state.weeks[mon];
+  if (w && w.prep) return w.prep;
+  const merged = {};
+  weekDates(mon).forEach(d => Object.assign(merged, day(d).prep || {}));
+  if (create) { state.weeks[mon] = w || {}; state.weeks[mon].prep = merged; }
+  return merged;
+}
 function prepCard(date) {
-  const x = day(date), p = x.prep || {}, L = prepLists(), edit = !!ui.prepEdit;
+  const p = prepChecks(date), L = prepLists(), edit = !!ui.prepEdit;
   const n = L.todo.filter(it => p[it.id]).length, m = L.shop.filter(it => p[it.id]).length;
   const folded = !!state.meta.prepFold && !edit;
   const foldBtn = `<button class="fold-btn ${folded ? '' : 'open'}" data-act="prep-fold" aria-expanded="${!folded}" aria-label="${folded ? '펼치기' : '접기'}">${ic('chevR')}</button>`;
   if (folded) return `<section class="card folded" id="prep">
-    <div class="card-h"><h2>일요일 준비</h2><span class="ph-r"><span class="muted">할 일 ${n}/${L.todo.length} · 장보기 ${m}/${L.shop.length}</span>${foldBtn}</span></div>
+    <div class="card-h"><h2>이번 주 준비</h2><span class="ph-r"><span class="muted">할 일 ${n}/${L.todo.length} · 장보기 ${m}/${L.shop.length}</span>${foldBtn}</span></div>
   </section>`;
   return `<section class="card" id="prep">
-    <div class="card-h"><h2>일요일 준비</h2><span class="ph-r">${edit ? '' : `<span class="muted">${n}/${L.todo.length}</span>`}<button class="sa-btn ${edit ? 'fold' : ''}" data-act="prep-edit">${ic(edit ? 'check' : 'swap')}${edit ? '완료' : '편집'}</button>${edit ? '' : foldBtn}</span></div>
+    <div class="card-h"><h2>이번 주 준비</h2><span class="ph-r">${edit ? '' : `<span class="muted">${n}/${L.todo.length}</span>`}<button class="sa-btn ${edit ? 'fold' : ''}" data-act="prep-edit">${ic(edit ? 'check' : 'swap')}${edit ? '완료' : '편집'}</button>${edit ? '' : foldBtn}</span></div>
     ${prepRows(date, 'todo', L.todo, p, edit)}
     <h3 class="h3">장보기 ${edit ? '' : `<span class="muted">${m}/${L.shop.length}</span>`}</h3>
     ${prepRows(date, 'shop', L.shop, p, edit)}
@@ -703,10 +743,9 @@ function backupNag() {
 // ---------- 탭: 오늘 ----------
 function viewToday() {
   const d = ui.date, t = todayStr();
-  const pre = weekNo(d) < 1 || dow(d) === 0;
   return appbar(eyebrowFor(d), longDate(d), 'nav') +
     (d !== t ? `<button class="back-today" data-act="goto" data-target="today" data-date="${t}">오늘로 돌아가기</button>` : '') +
-    weekStrip(d, 'today') + (lvlSet() ? '' : levelCard()) + (profileSet() ? '' : profileNag()) + goalCard(d) + backupNag() + sessionBlock(d) + morningCard(d) + dietCard(d) + (pre ? prepCard(d) : '');
+    weekStrip(d, 'today') + (lvlSet() ? '' : levelCard()) + (profileSet() ? '' : profileNag()) + goalCard(d) + backupNag() + sessionBlock(d) + morningCard(d) + dietCard(d) + prepCard(d);
 }
 
 // ---------- 포커스 모드 ----------
@@ -842,7 +881,7 @@ function buildReport(mon) {
     L.push(`- 나: ${who || '정보 없음'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}`);
     L.push(`- 식단 목표: 단백질 ${tg.protein}g/일, 암장 날 ${tg.gym}kcal · 쉬는 날 ${tg.rest}kcal${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? ' (직접 지정)' : ' (자동 계산)'}`);
   }
-  L.push(`- 레벨: V${lvl()} (${tier().range} ${tier().name}) · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
+  L.push(`- 레벨: V${lvl()}${gradeSys() === 'v' ? '' : ` (${PLAN.gradeSystems[gradeSys()].name} ${levelName()})`} · ${tier().range} ${tier().name} · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
   L.push('- 주간 묶음: 한계(고강도) · 근력(고강도, 집 C 대체 가능) · 볼륨 · 집 A · 집 B · 휴식 2. 요일 자유, 고강도 연속 금지');
   L.push(`- 이번 주 진행표: ${cfg.goal} / 행보드 ${hangFor(mon).skip ? '생략' : hangFor(mon).text} / 풀업 ${pullFor(mon)}${cfg.recovery ? ' / 회복 주간' : ''}`);
   L.push('');
@@ -955,7 +994,7 @@ function viewSettings() {
       <button class="btn danger" data-act="reset">모든 기록 지우기</button>
     </section>
     ${analysisCard(mondayOf(todayStr()))}
-    <section class="card"><div class="card-h"><h2>진행표</h2><span class="muted">V${lvl()} · ${tier().name}</span></div>
+    <section class="card"><div class="card-h"><h2>진행표</h2><span class="muted">${levelName()} · ${tier().name}</span></div>
       <div class="tbl"><table><thead><tr><th>주차</th><th>목표</th><th>행보드</th><th>풀업</th></tr></thead><tbody>
       ${[1, 2, 3, 4, 5, 7].map(w => { const c = weekCfg(w); return `<tr><td>${w === 5 ? '5~6' : w === 7 ? '7~8' : w}</td><td>${c.goal}</td><td>${c.hang == null ? '생략' : tier().hangLevels[c.hang]}</td><td>${c.pull}</td></tr>`; }).join('')}
       </tbody></table></div>
@@ -1061,8 +1100,8 @@ document.addEventListener('click', e => {
       if (j < 0 || j >= l.length) return;
       [l[i], l[j]] = [l[j], l[i]]; return commit();
     }
-    case 'prep-reset': if (confirm('일요일 준비·장보기 목록을 처음 상태로 되돌릴까요?')) { delete state.prepList; return commit(); } return;
-    case 'prep': { const x = dayW(d); x.prep = x.prep || {}; x.prep[b.dataset.id] = !x.prep[b.dataset.id]; return commit(); }
+    case 'prep-reset': if (confirm('이번 주 준비·장보기 목록을 처음 상태로 되돌릴까요?')) { delete state.prepList; return commit(); } return;
+    case 'prep': { const pc = prepChecks(d, true); pc[b.dataset.id] = !pc[b.dataset.id]; return commit(); }
     case 'time': dayW(d).time = b.dataset.v; return commit();
     case 'flag': { const x = dayW(d); x[b.dataset.k] = !x[b.dataset.k]; return commit(); }
     case 'adj': {
@@ -1082,9 +1121,15 @@ document.addEventListener('click', e => {
     case 'report-share': return reportAction('share', b.dataset.mon);
     case 'report-file': return reportAction('file', b.dataset.mon);
     case 'level': {
-      const v = +b.dataset.v; state.settings.level = v; commit();
+      const v = +b.dataset.v; state.settings.level = v; state.settings.gradeColor = null; commit();
       return toast(`V${v} · ${tier().name} 프로그램으로 바꿨어요`);
     }
+    case 'level-c': {
+      const i = +b.dataset.i, c = sysColors()[i];
+      state.settings.level = c.lo; state.settings.gradeColor = i; commit();
+      return toast(`${c.n} (V${c.lo}) · ${tier().name} 프로그램으로 바꿨어요`);
+    }
+    case 'grade-sys': state.settings.gradeSys = b.dataset.v; state.settings.gradeColor = null; return commit();
     case 'prep-fold': state.meta.prepFold = !state.meta.prepFold; return commit();
     case 'set-v': state.settings[b.dataset.k] = b.dataset.v; return commit();
     case 'theme': state.meta.theme = b.dataset.v; save(); applyTheme(); return render();

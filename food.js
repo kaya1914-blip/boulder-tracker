@@ -3,6 +3,9 @@
 
 const FOOD_MAP = Object.fromEntries(FOODS.map(f => [f.id, f]));
 const myFoods = () => (state.foods = state.foods || []);
+// 내 조합: 자주 먹는 음식 묶음 { id, n, items: [{f|n,k,p, q}] }
+const myCombos = () => (state.combos = state.combos || []);
+const comboTotals = c => sumItems(c.items);
 function foodOf(it) {
   if (it.f) return FOOD_MAP[it.f] || myFoods().find(x => x.id === it.f) || { n: '(지운 음식)', u: '', k: 0, p: 0, s: 1 };
   return { n: it.n, u: '1회', k: it.k || 0, p: it.p || 0, s: 1 };
@@ -110,7 +113,7 @@ function slotBlock(date, sl, items) {
       const f = foodOf(it);
       return `<li>
         <span class="fi-n"><b>${esc(f.n)}</b><small>${esc(f.u)} 기준</small></span>
-        <span class="fi-q"><button class="q-btn" data-act="f-q" data-date="${date}" data-slot="${sl.id}" data-i="${i}" data-d="-1" aria-label="줄이기">${ic('minus')}</button><b>${qtyText(it.q)}</b><button class="q-btn" data-act="f-q" data-date="${date}" data-slot="${sl.id}" data-i="${i}" data-d="1" aria-label="늘리기">${ic('plus')}</button></span>
+        <span class="fi-q"><button class="q-btn" data-act="f-q" data-date="${date}" data-slot="${sl.id}" data-i="${i}" data-d="-1" aria-label="줄이기">${ic('minus')}</button><b>${qtyText(it.q)}</b><button class="q-btn" data-act="f-q" data-date="${date}" data-slot="${sl.id}" data-i="${i}" data-d="1" aria-label="늘리기">${ic('plus')}</button><button class="q-btn del" data-act="f-del" data-date="${date}" data-slot="${sl.id}" data-i="${i}" aria-label="${esc(f.n)} 삭제">${ic('close')}</button></span>
         <span class="fi-k"><b>${Math.round(f.k * it.q)}</b><small>${Math.round(f.p * it.q * 10) / 10}g</small></span>
       </li>`;
     }).join('')}</ul>` : sl.sug.length ? `<button class="sug" data-act="f-sug" data-date="${date}" data-slot="${sl.id}">
@@ -118,6 +121,8 @@ function slotBlock(date, sl, items) {
         <span class="sug-b">${ic('check')}이대로</span></button>` : ''}
     <div class="slot-act">
       <button class="sa-btn" data-act="f-open" data-date="${date}" data-slot="${sl.id}">${ic('plus')}음식 추가</button>
+      ${myCombos().length ? `<button class="sa-btn" data-act="f-combos" data-date="${date}" data-slot="${sl.id}">${ic('stack')}내 조합</button>` : ''}
+      ${items.length ? `<button class="sa-btn" data-act="f-combo-save" data-date="${date}" data-slot="${sl.id}">${ic('copy')}조합 저장</button>` : ''}
       ${sl.id === 'd' ? `<button class="sa-btn" data-act="f-dinners" data-date="${date}">${ic('food')}추천 메뉴 보기</button>` : ''}
       ${items.length ? `<button class="sa-btn ghost" data-act="f-clear" data-date="${date}" data-slot="${sl.id}">비우기</button><button class="sa-btn fold" data-act="f-toggle" data-key="${key}" aria-expanded="true">${ic('check')}접기</button>` : ''}
     </div>
@@ -156,6 +161,22 @@ function renderSheet() {
   const sh = ui.sheet;
   if (!sh) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
+  if (sh.mode === 'combo') {
+    const slotName = (slotsFor(sh.date).find(x => x.id === sh.slot) || {}).t || '';
+    const list = myCombos();
+    el.innerHTML = `<div class="sh-back" data-act="sheet-close"></div><div class="sh-panel" role="dialog" aria-label="내 조합 불러오기">
+      <div class="sh-grab"></div>
+      <div class="sh-h"><h3>내 조합<small>${slotName ? ' → ' + esc(slotName) : ''}</small></h3><button class="sh-x" data-act="sheet-close" aria-label="닫기">${ic('close')}</button></div>
+      <p class="hint">누르면 이 끼니에 조합의 음식이 한 번에 들어갑니다. 끼니에 음식을 담고 "조합 저장"을 누르면 여기에 추가됩니다.</p>
+      <div class="sh-list">${list.length ? list.map(c => { const t = comboTotals(c); return `<div class="frow">
+        <button class="frow-main" data-act="f-combo-add" data-id="${c.id}">
+          <span class="fr-n"><b>${esc(c.n)}</b><small>${esc(c.items.map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')}${it.q !== 1 ? ' ' + qtyText(it.q) : ''}`).join(' · '))}</small></span>
+          <span class="fr-k"><b>${Math.round(t.k)}</b><small>kcal · ${Math.round(t.p)}g</small></span>
+          <span class="fr-add">${ic('plus')}</span>
+        </button><button class="fr-del" data-act="f-combo-del" data-id="${c.id}" aria-label="${esc(c.n)} 조합 지우기">${ic('close')}</button>
+      </div>`; }).join('') : '<p class="hint center">저장한 조합이 없습니다.</p>'}</div></div>`;
+    return;
+  }
   if (sh.mode === 'dinner') {
     const cur = JSON.stringify((day(sh.date).food || {}).d || []);
     el.innerHTML = `<div class="sh-back" data-act="sheet-close"></div><div class="sh-panel" role="dialog" aria-label="저녁 메뉴 고르기">
@@ -219,6 +240,41 @@ document.addEventListener('click', e => {
       return commit();
     }
     case 'f-clear': { const x = dayW(d); if (x.food) delete x.food[b.dataset.slot]; return commit(); }
+    case 'f-del': {
+      const list = slotItems(d, b.dataset.slot), it = list[+b.dataset.i];
+      if (!it) return;
+      list.splice(+b.dataset.i, 1);
+      if (!list.length) delete dayW(d).food[b.dataset.slot];
+      toast(`${foodOf(it).n.replace(/ \(.*\)$/, '')} 삭제`);
+      return commit();
+    }
+    case 'f-combos': return openSheet({ mode: 'combo', date: d, slot: b.dataset.slot });
+    case 'f-combo-save': {
+      const items = ((day(d).food || {})[b.dataset.slot] || []).map(it => Object.assign({}, it));
+      if (!items.length) return;
+      const def = items.map(it => foodOf(it).n.replace(/ \(.*\)$/, '')).slice(0, 3).join('+');
+      const n = (prompt('조합 이름을 정해 주세요', def) || '').trim();
+      if (!n) return;
+      myCombos().push({ id: 'cb' + Date.now().toString(36), n, items });
+      toast(`"${n}" 조합을 저장했어요`);
+      return commit();
+    }
+    case 'f-combo-add': {
+      const c = myCombos().find(x => x.id === b.dataset.id);
+      if (!c) return;
+      const list = slotItems(d, ui.sheet.slot);
+      c.items.forEach(ci => {
+        const ex = ci.f && list.find(it => it.f === ci.f);
+        if (ex) ex.q = r1(ex.q + ci.q); else list.push(Object.assign({}, ci));
+      });
+      toast(`${c.n} 추가`);
+      closeSheet(); return commit();
+    }
+    case 'f-combo-del': {
+      const c = myCombos().find(x => x.id === b.dataset.id);
+      if (c && confirm(`"${c.n}" 조합을 지울까요?`)) { state.combos = myCombos().filter(x => x.id !== c.id); save(); renderSheet(); render(); }
+      return;
+    }
     case 'f-q': {
       const list = slotItems(d, b.dataset.slot), it = list[+b.dataset.i];
       if (!it) return;

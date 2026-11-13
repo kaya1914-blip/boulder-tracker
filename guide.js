@@ -253,7 +253,7 @@ function renderGuide() {
   const list = ui.guide.filter(k => GUIDE[k]);
   const sec = (title, items, cls) => items && items.length ? `<h4 class="gd-h ${cls}">${title}</h4><${cls === 'how' ? 'ol' : 'ul'} class="gd-list ${cls}">${items.map(t => `<li>${esc(fill(t))}</li>`).join('')}</${cls === 'how' ? 'ol' : 'ul'}>` : '';
   const ti = tierIdx();
-  const lvSec = k => GUIDE_LV[k] ? `<h4 class="gd-h lvh">레벨별 방법 · 내 레벨 V${lvl()}</h4><ul class="gd-list lvl">${GUIDE_LV[k].map((t, i) => `<li class="${i === ti ? 'me' : ''}"><b>${PLAN.tiers[i].range}</b> ${esc(t)}</li>`).join('')}</ul>` : '';
+  const lvSec = k => GUIDE_LV[k] ? `<h4 class="gd-h lvh">레벨별 방법 · 내 레벨 ${levelName()}${gradeSys() === 'v' ? '' : ' (V' + lvl() + ')'}</h4><ul class="gd-list lvl">${GUIDE_LV[k].map((t, i) => `<li class="${i === ti ? 'me' : ''}"><b>${PLAN.tiers[i].range}</b> ${esc(t)}</li>`).join('')}</ul>` : '';
   el.hidden = false;
   el.innerHTML = `<div class="sh-back" data-act="g-close"></div><div class="sh-panel" role="dialog" aria-label="운동 방법">
     <div class="sh-grab"></div>

@@ -1,5 +1,5 @@
 // 오프라인용 서비스 워커: 온라인이면 최신 파일, 오프라인이면 저장해 둔 파일
-const CACHE = 'bt-v21';
+const CACHE = 'bt-v22';
 const FILES = ['./', './index.html', './style.css', './plan.js', './foods.js', './app.js', './food.js', './guide.js', './timer.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -672,3 +672,16 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 
 /* 설정: 토글 아래 입력칸 간격 */
 .seg.theme-seg + .fields2 { margin-top: 14px; }
+
+/* 등급 기준 · 색 버튼 */
+.lv-sys { margin-top: 12px; }
+.lv-grid.colors { grid-template-columns: repeat(4, 1fr); }
+.lv-btn.col { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px; min-height: 64px; font-family: inherit; }
+.lv-btn.col b { font-size: 13px; font-weight: 800; }
+.lv-btn.col small { font-size: 10.5px; color: var(--muted); font-family: var(--num); }
+.lv-btn.col.on small { color: inherit; opacity: .85; }
+.lv-btn .sw { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line-2); }
+
+/* 음식 한 번에 삭제 */
+.q-btn.del { margin-left: 4px; background: transparent; border: 1px solid var(--line-2); color: var(--muted); }
+.q-btn.del:active { color: var(--amber-t, #d97800); }

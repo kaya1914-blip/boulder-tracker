@@ -19,6 +19,8 @@ const PLAN = {
     fastLossKg: 0.8,           // 주 평균 감량이 이 값 초과면 과감량
     shortSleepH: 6,
     shortSleepDays: 3,
+    gradeSys: 'v',             // 레벨 보기 기준: 'v' V 등급 · 'climb' 더클라임 색 · 'wave' 웨이브락 색
+    gradeColor: null,          // 색 기준에서 고른 색 번호
     level: null,               // 클라이밍 레벨 V0~V10 (null이면 고르기 전 · 계산은 V4 기준)
   },
   defaultLevel: 4,
@@ -58,6 +60,29 @@ const PLAN = {
       lock: { t: '한 팔 록오프', d: '한 팔 90° 5초 (반대 손가락 보조 최소) · 좌우 3회 × 3세트', tm: { kind: 'interval', title: '한 팔 록오프', work: 5, rest: 15, reps: 6, sets: 3, setRest: 180 } },
     },
   ],
+
+  // 레벨을 고르고 보여주는 기준. 색 등급은 공식 V 대응표가 없어 대략적인 값입니다 (지점·세팅마다 다름).
+  // lo~hi: 그 색이 대략 해당하는 V 등급. 색을 고르면 레벨은 lo로 정합니다.
+  gradeSystems: {
+    v: { name: 'V 등급', short: 'V' },
+    climb: {
+      name: '더클라임', short: '더클라임', note: '블로그·커뮤니티에서 쓰는 대략적인 대응입니다. 지점마다 차이가 있습니다.',
+      colors: [
+        { n: '흰색', hex: '#F4F4F4', lo: 0, hi: 0 }, { n: '노랑', hex: '#F5C518', lo: 0, hi: 0 }, { n: '주황', hex: '#F28C28', lo: 1, hi: 1 },
+        { n: '초록', hex: '#2E9E44', lo: 2, hi: 2 }, { n: '파랑', hex: '#2B6CD9', lo: 3, hi: 3 }, { n: '빨강', hex: '#D93025', lo: 4, hi: 4 },
+        { n: '보라', hex: '#7E3FB5', lo: 5, hi: 5 }, { n: '회색', hex: '#9AA0A6', lo: 6, hi: 6 }, { n: '갈색', hex: '#8B5A2B', lo: 7, hi: 7 },
+        { n: '검정', hex: '#222222', lo: 8, hi: 10 },
+      ],
+    },
+    wave: {
+      name: '웨이브락', short: '웨이브락', note: '강습 단계 순서(노랑→초록→하늘→남색→보라→갈색)에 맞춘 대략적인 대응입니다. 지점·세팅마다 다릅니다.',
+      colors: [
+        { n: '노랑', hex: '#F5C518', lo: 0, hi: 0 }, { n: '초록', hex: '#2E9E44', lo: 1, hi: 1 }, { n: '하늘', hex: '#5BC0EB', lo: 2, hi: 2 },
+        { n: '남색', hex: '#1F3A93', lo: 3, hi: 3 }, { n: '보라', hex: '#7E3FB5', lo: 4, hi: 4 }, { n: '갈색', hex: '#8B5A2B', lo: 5, hi: 5 },
+        { n: '흰색', hex: '#F4F4F4', lo: 6, hi: 10 },
+      ],
+    },
+  },
 
   // 한 주에 채울 세션 묶음 (str 슬롯은 근력 또는 집 C)
   slots: [
@@ -298,6 +323,7 @@ const PLAN = {
   ],
   avoid: '치킨 · 튀김 · 단 음료 · 운동 후 야식 · 면+밥 조합 · 술은 주 1회 이하, 암장 날 금지',
 
+  // 이번 주 준비 할 일 (요일 상관없이 주 단위로 체크)
   sundayPrep: [
     { id: 'eg', t: '계란 8~10개 삶기 (9분)' },
     { id: 'pd', t: '단백질 음료를 회사 서랍·가방에 넣어두기' },
