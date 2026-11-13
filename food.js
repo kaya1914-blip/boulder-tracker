@@ -17,10 +17,16 @@ function qtyText(q) {
 // ---------- 그날의 끼니 구성 ----------
 function isGymDay(date) { const s = S(sessOn(date)); return !!(s && s.gym); }
 function riceQty(date) {
-  const gym = isGymDay(date);
-  let q = PLAN.meals.rice[gym ? 'gym' : 'rest'];
-  if (!gym && verdict(addDays(mondayOf(date), -7)).flags.plateau) q = Math.max(0, q - 1 / 3);
-  return r1(q);
+  const gym = isGymDay(date), m = PLAN.meals, k = gym ? 'gym' : 'rest';
+  let q = m.rice[k];
+  // 내 목표 칼로리와 기준 칼로리의 차이를 밥 양으로 맞춤 (밥이 들어가는 끼니 2번에 나눠서, 1/3공기 단위)
+  const diff = targets(date)[k] - m.refKcal[k];
+  q += Math.round((diff / 2 / m.riceKcal) * 3) / 3;
+  if (verdict(addDays(mondayOf(date), -7)).flags.plateau) {
+    if (goalOf() === 'gain') q += 1 / 3;
+    else if (goalOf() === 'cut' && !gym) q -= 1 / 3;
+  }
+  return r1(Math.max(0, Math.min(2, q)));
 }
 function dinnerDefault(date) {
   const n = PLAN.dinners.length;
@@ -52,7 +58,8 @@ function dietNotes(date) {
   const gym = isGymDay(date), pf = verdict(addDays(mondayOf(date), -7)).flags, notes = [];
   if (gym && day(date).time === 'day') notes.push('낮 운동: 점심을 운동 2시간 전에 든든하게 먹고, 운동 전 계란은 뺍니다.');
   if (gym && pf.fast) notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 전 식빵 1장 추가');
-  if (!gym && pf.plateau) notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 1/3공기 줄인 양으로 추천합니다');
+  if (pf.plateau && goalOf() === 'gain') notes.push('지난주 체중이 늘지 않음 → 오늘은 끼니마다 밥 1/3공기 늘린 양으로 추천합니다');
+  else if (!gym && pf.plateau && goalOf() === 'cut') notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 1/3공기 줄인 양으로 추천합니다');
   return notes;
 }
 const sumItems = items => items.reduce((a, it) => { const f = foodOf(it); a.k += f.k * it.q; a.p += f.p * it.q; return a; }, { k: 0, p: 0 });
@@ -68,7 +75,7 @@ function foodTotals(date) {
 function dietCard(date) {
   const gym = isGymDay(date), x = day(date), fd = x.food || {};
   const slots = slotsFor(date), tot = foodTotals(date);
-  const pt = PLAN.meals.proteinTarget, kt = PLAN.meals.kcalTarget[gym ? 'gym' : 'rest'];
+  const tg = targets(date), pt = tg.protein, kt = tg[gym ? 'gym' : 'rest'];
   const k = Math.round(tot.k), p = Math.round(tot.p);
   return `<section class="card" id="diet">
     <div class="card-h"><h2>식단</h2><span class="pill ${gym ? 'i-high' : 'i-rest'}">${gym ? '암장 날' : '쉬는 날'} · 목표 ${kt.toLocaleString()}kcal</span></div>
@@ -79,6 +86,7 @@ function dietCard(date) {
       <div class="macro-txt"><div class="mx-k"><i class="dot kcal"></i>칼로리</div><div class="mx-v">${k > kt ? `${(k - kt).toLocaleString()} 초과` : `${(kt - k).toLocaleString()} 남음`}</div></div>
     </div>
     ${sessOn(date) ? '' : '<p class="hint">세션을 고르기 전이라 쉬는 날 기준으로 보여줍니다.</p>'}
+    ${tg.auto.none ? `<button class="nag" data-act="tab" data-tab="settings">${ic('scale')}체중·키·나이를 넣으면 칼로리와 단백질 목표가 내 몸에 맞춰집니다 · 설정</button>` : ''}
     ${dietNotes(date).map(n => `<p class="note">${ic('spark')}${n}</p>`).join('')}
     <div class="slots">${slots.map(sl => slotBlock(date, sl, fd[sl.id] || [])).join('')}</div>
     <p class="hint">칼로리는 음식 DB의 대략치입니다. 피할 것 · ${PLAN.avoid}</p>

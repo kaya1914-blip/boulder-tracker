@@ -1,7 +1,7 @@
 {
-  "name": "볼더링 복귀 트래커",
+  "name": "볼더링 트래커",
   "short_name": "볼더링",
-  "description": "볼더링 복귀 트레이닝·식단 트래커",
+  "description": "볼더링 트레이닝·식단 트래커",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

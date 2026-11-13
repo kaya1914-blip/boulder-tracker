@@ -3,10 +3,18 @@
 
 const PLAN = {
   defaults: {
-    startDate: '2026-11-16',   // 1주차 월요일
-    startWeight: 65,
-    targetWeight: 63,
-    targetDate: '2026-12-13',
+    startDate: null,           // 1주차 월요일 (비어 있으면 다가오는 월요일)
+    targetDate: null,          // 비어 있으면 1주차 + 4주
+    // 내 정보 · 목표 (설정에서 입력. 키·나이·성별이 있으면 칼로리를 기초대사량으로 계산)
+    sex: null,                 // 'm' | 'f'
+    age: null,
+    heightCm: null,
+    startWeight: null,
+    targetWeight: null,
+    goal: 'keep',              // 'cut' 감량 | 'keep' 유지 | 'gain' 증량
+    kcalGym: null,             // 직접 정한 하루 칼로리 (비우면 자동)
+    kcalRest: null,
+    protein: null,             // 직접 정한 하루 단백질 g (비우면 자동)
     plateauKg: 0.2,            // 주 평균 변화가 이 값 이내(또는 증가)면 정체
     fastLossKg: 0.8,           // 주 평균 감량이 이 값 초과면 과감량
     shortSleepH: 6,
@@ -266,8 +274,13 @@ const PLAN = {
     dayWorkoutLunch: [['rice', 1], ['egg', 2], ['tofu', 1]],
     fastLossExtra: ['bread', 1],
     rice: { gym: 2 / 3, rest: 1 / 3 },
-    proteinTarget: 120,
-    kcalTarget: { gym: 1950, rest: 1650 },
+    // 끼니 추천의 기준 칼로리. 내 목표 칼로리가 이보다 많거나 적으면 밥 양을 1/3공기 단위로 늘리거나 줄입니다.
+    refKcal: { gym: 1950, rest: 1650 },
+    riceKcal: 300,             // 밥 1공기
+    // 자동 목표: 활동 계수 · 목표별 칼로리 배수 · 체중 1kg당 단백질
+    activity: { gym: 1.6, rest: 1.35 },
+    goalFactor: { cut: 0.82, keep: 1, gain: 1.1 },
+    proteinPerKg: { cut: 1.9, keep: 1.6, gain: 1.8 },
   },
   // 저녁 추천 메뉴. rice: true면 그날 밥 양을 함께 넣습니다.
   dinners: [

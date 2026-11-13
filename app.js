@@ -1,14 +1,27 @@
 'use strict';
-/* 볼더링 복귀 트래커 — 데이터는 이 기기 브라우저(localStorage)에만 저장됩니다. */
+/* 볼더링 트래커 — 데이터는 이 기기 브라우저(localStorage)에만 저장됩니다. */
 
 // ---------- 저장 ----------
 const KEY = 'bt.v1';
 function freshState() {
-  return { v: 1, settings: Object.assign({}, PLAN.defaults), days: {}, weeks: {}, meta: {}, timer: {} };
+  return normalize({ v: 1, settings: {}, days: {}, weeks: {}, meta: {}, timer: {} });
+}
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function nextMonday() {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + ((8 - d.getDay()) % 7));
+  return ymd(d);
 }
 function normalize(s) {
   if (!s || typeof s !== 'object' || typeof s.days !== 'object') return null;
-  s.settings = Object.assign({}, PLAN.defaults, s.settings || {});
+  const saved = s.settings || {};
+  // 예전 기록: 목표 종류가 없으면 시작·목표 체중으로 추정
+  if (!('goal' in saved) && typeof saved.startWeight === 'number' && typeof saved.targetWeight === 'number') {
+    saved.goal = saved.targetWeight < saved.startWeight ? 'cut' : saved.targetWeight > saved.startWeight ? 'gain' : 'keep';
+  }
+  s.settings = Object.assign({}, PLAN.defaults, saved);
+  if (!s.settings.startDate) s.settings.startDate = nextMonday();
+  if (!s.settings.targetDate) { const d = new Date(s.settings.startDate + 'T00:00:00'); d.setDate(d.getDate() + 27); s.settings.targetDate = ymd(d); }
   s.weeks = s.weeks || {};
   s.meta = s.meta || {};
   s.timer = s.timer || {};
@@ -105,6 +118,34 @@ function fill(str) {
   if (!str) return str;
   const g = grades(), t = tier();
   return String(str).replace(/\{(proj|vol|easy|warm|grip|lockT|lockD)\}/g, (m, k) => (k === 'grip' ? t.grip : k === 'lockT' ? t.lock.t : k === 'lockD' ? t.lock.d : g[k]));
+}
+
+// ---------- 몸·목표·식단 목표 ----------
+const GOALS = { cut: '감량', keep: '유지', gain: '증량' };
+const goalOf = () => (GOALS[state.settings.goal] ? state.settings.goal : 'keep');
+// 체중 목표가 있는지 (유지가 아니고 시작·목표 체중이 모두 있을 때)
+const weightGoal = () => goalOf() !== 'keep' && isNum(state.settings.startWeight) && isNum(state.settings.targetWeight) && state.settings.startWeight !== state.settings.targetWeight;
+const profileSet = () => { const s = state.settings; return !!(s.sex && isNum(s.age) && isNum(s.heightCm) && isNum(s.startWeight)); };
+function curWeight(date) {
+  const v = avgWeightAround(date);
+  return isNum(v) ? v : (lastWeightBefore(date) ?? state.settings.startWeight ?? null);
+}
+// 자동 목표: 키·나이·성별이 있으면 기초대사량(Mifflin-St Jeor) × 활동 계수, 없으면 체중 기준 근사치
+function autoTargets(date) {
+  const s = state.settings, w = curWeight(date), g = goalOf(), m = PLAN.meals;
+  if (!isNum(w)) return null;
+  const f = m.goalFactor[g], full = (s.sex === 'm' || s.sex === 'f') && isNum(s.age) && isNum(s.heightCm);
+  let rest, gym;
+  if (full) {
+    const bmr = 10 * w + 6.25 * s.heightCm - 5 * s.age + (s.sex === 'f' ? -161 : 5);
+    rest = bmr * m.activity.rest * f; gym = bmr * m.activity.gym * f;
+  } else { rest = w * 31 * f; gym = w * 37 * f; }
+  const r50 = v => Math.round(v / 50) * 50;
+  return { rest: r50(rest), gym: r50(gym), protein: Math.round((w * m.proteinPerKg[g]) / 5) * 5, bmr: full };
+}
+function targets(date) {
+  const s = state.settings, a = autoTargets(date) || { gym: PLAN.meals.refKcal.gym, rest: PLAN.meals.refKcal.rest, protein: 100, bmr: false, none: true };
+  return { gym: isNum(s.kcalGym) ? s.kcalGym : a.gym, rest: isNum(s.kcalRest) ? s.kcalRest : a.rest, protein: isNum(s.protein) ? s.protein : a.protein, auto: a };
 }
 
 function weekCfg(w) {
@@ -299,14 +340,24 @@ function verdict(mon) {
   const cards = [], flags = {};
   const ended = addDays(mon, 6) < todayStr();
   let pAvg = p.weights.length >= 2 ? p.avg : null, pLabel = '지난주 평균';
-  if (pAvg == null && w === 1) { pAvg = st.startWeight; pLabel = '시작 체중'; }
+  if (pAvg == null && w === 1 && isNum(st.startWeight)) { pAvg = st.startWeight; pLabel = '시작 체중'; }
+  const goal = goalOf();
 
   if (s.weights.length < 3 || pAvg == null) {
     cards.push({ lv: 'info', icon: 'scale', t: '체중 판정 보류', b: `기록이 부족합니다 (이번 주 ${s.weights.length}일${pAvg == null ? ', 지난주 2일 미만' : ''}). 아침 체중을 3일 이상 적으면 판정합니다.` });
   } else {
     const diff = s.avg - pAvg;
     const line = `${pLabel} ${f1(pAvg)} → 이번 주 ${f1(s.avg)}kg (${diff > 0 ? '+' : ''}${diff.toFixed(1)})`;
-    if (diff > -st.plateauKg) {
+    if (goal === 'gain') {
+      if (diff < st.plateauKg) { flags.plateau = true; cards.push({ lv: 'warn', icon: 'scale', t: '체중이 늘지 않음', b: `${line}. 다음 주는 끼니마다 밥 1/3공기를 더합니다.` }); }
+      else if (diff > st.fastLossKg) cards.push({ lv: 'warn', icon: 'scale', t: '체중이 너무 빨리 늘어남', b: `${line}. 간식·야식을 줄이고 단백질 위주로 먹습니다.` });
+      else cards.push({ lv: 'ok', icon: 'scale', t: '증량 순조', b: `${line}. 계획대로 진행합니다.` });
+    } else if (goal === 'keep') {
+      if (Math.abs(diff) > st.fastLossKg) {
+        if (diff < 0) flags.fast = true;
+        cards.push({ lv: 'warn', icon: 'scale', t: diff < 0 ? '체중이 빠지는 중' : '체중이 느는 중', b: `${line}. 유지가 목표라 ${diff < 0 ? '다음 주 운동 전에 간식을 더합니다.' : '간식·야식을 줄입니다.'}` });
+      } else cards.push({ lv: 'ok', icon: 'scale', t: '체중 유지 중', b: `${line}. 계획대로 진행합니다.` });
+    } else if (diff > -st.plateauKg) {
       flags.plateau = true;
       cards.push({ lv: 'warn', icon: 'scale', t: '체중 정체', b: `${line}. 다음 주 쉬는 날은 끼니마다 밥 1/3공기를 더 줄입니다.` });
     } else if (-diff > st.fastLossKg) {
@@ -354,7 +405,9 @@ function weightChart() {
   let x0 = addDays(startMon, -7), x1 = st.targetDate > addDays(startMon, 27) ? st.targetDate : addDays(startMon, 27);
   if (pts.length) { if (pts[0].d < x0) x0 = mondayOf(pts[0].d); if (pts[pts.length - 1].d > x1) x1 = pts[pts.length - 1].d; }
   const span = Math.max(1, diffDays(x1, x0));
-  const all = pts.map(p => p.w).concat([st.targetWeight, st.startWeight]);
+  const wg = weightGoal();
+  const all = pts.map(p => p.w).concat(wg ? [st.targetWeight, st.startWeight] : []).concat(!pts.length && isNum(st.startWeight) ? [st.startWeight] : []);
+  if (!all.length) all.push(60);
   const y0 = Math.floor(Math.min(...all) - 0.5), y1 = Math.ceil(Math.max(...all) + 0.5);
   const W = 340, H = 210, L = 28, R = 8, T = 14, B = 24;
   const X = d => +(L + (diffDays(d, x0) / span) * (W - L - R)).toFixed(1);
@@ -368,9 +421,11 @@ function weightChart() {
   mons.forEach((d, i) => { if (i % every === 0) g += `<text x="${X(d)}" y="${H - 6}" class="c-lbl" text-anchor="middle">${md(d)}</text>`; });
   const t = todayStr();
   if (t >= x0 && t <= x1) g += `<line x1="${X(t)}" x2="${X(t)}" y1="${T}" y2="${H - B}" class="c-today"/><text x="${X(t)}" y="${T - 4}" class="c-lbl" text-anchor="middle">오늘</text>`;
-  g += `<line x1="${X(st.startDate)}" y1="${Y(st.startWeight)}" x2="${X(st.targetDate)}" y2="${Y(st.targetWeight)}" class="c-plan"/>`;
-  g += `<line x1="${L}" x2="${W - R}" y1="${Y(st.targetWeight)}" y2="${Y(st.targetWeight)}" class="c-goal"/>`;
-  g += `<text x="${L + 4}" y="${Y(st.targetWeight) + 13}" class="c-goal-lbl">목표 ${st.targetWeight}kg</text>`;
+  if (wg) {
+    g += `<line x1="${X(st.startDate)}" y1="${Y(st.startWeight)}" x2="${X(st.targetDate)}" y2="${Y(st.targetWeight)}" class="c-plan"/>`;
+    g += `<line x1="${L}" x2="${W - R}" y1="${Y(st.targetWeight)}" y2="${Y(st.targetWeight)}" class="c-goal"/>`;
+    g += `<text x="${L + 4}" y="${Y(st.targetWeight) + 13}" class="c-goal-lbl">목표 ${st.targetWeight}kg</text>`;
+  }
   const roll = pts.map(p => ({ x: X(p.d), y: Y(avg(pts.filter(q => q.d <= p.d && diffDays(p.d, q.d) <= 6).map(q => q.w))) }));
   if (roll.length > 1) {
     const line = roll.map(p => `${p.x},${p.y}`).join(' ');
@@ -430,9 +485,14 @@ function eyebrowFor(date) {
 
 function goalCard(date) {
   const st = state.settings, cur = avgWeightAround(date);
-  const left = isNum(cur) ? cur - st.targetWeight : null;
-  const p = isNum(cur) ? (st.startWeight - cur) / (st.startWeight - st.targetWeight) : 0;
   const dd = diffDays(st.targetDate, date);
+  if (!weightGoal()) return `<section class="goal">
+    <div class="g-l">${ic('scale')}<div><div class="g-k">체중 ${GOALS[goalOf()]}</div><div class="g-v ${isNum(cur) ? '' : 'empty'}">${isNum(cur) ? cur.toFixed(1) + '<small>kg · 7일 평균</small>' : '아침 체중을 적어주세요'}</div></div></div>
+    <div class="g-r"><div class="g-k">${dd >= 0 ? 'D-' + dd : '목표일 지남'}</div><div class="g-sub">4주 진행 목표일</div></div>
+  </section>`;
+  const sign = st.targetWeight < st.startWeight ? 1 : -1;
+  const left = isNum(cur) ? (cur - st.targetWeight) * sign : null;
+  const p = isNum(cur) ? (st.startWeight - cur) / (st.startWeight - st.targetWeight) : 0;
   return `<section class="goal">
     <div class="g-l">${ic('target')}<div><div class="g-k">목표 ${st.targetWeight}kg까지</div><div class="g-v ${left == null ? 'empty' : ''}">${left == null ? '아침 체중을 적어주세요' : left <= 0 ? '달성!' : left.toFixed(1) + '<small>kg</small>'}</div></div></div>
     <div class="g-r"><div class="g-k">${dd >= 0 ? 'D-' + dd : '목표일 지남'}</div><div class="g-sub">7일 평균 ${f1(cur)}kg</div></div>
@@ -631,6 +691,9 @@ function prepCard(date) {
   </section>`;
 }
 
+function profileNag() {
+  return `<button class="nag" data-act="tab" data-tab="settings">${ic('scale')}성별·나이·키·체중과 체중 목표(감량·유지·증량)를 넣으면 칼로리·단백질이 내 몸에 맞춰집니다 · 설정</button>`;
+}
 function backupNag() {
   const n = Object.keys(state.days).length, lb = state.meta.lastBackup;
   if (n < 5 || (lb && diffDays(todayStr(), lb) <= 7)) return '';
@@ -643,7 +706,7 @@ function viewToday() {
   const pre = weekNo(d) < 1 || dow(d) === 0;
   return appbar(eyebrowFor(d), longDate(d), 'nav') +
     (d !== t ? `<button class="back-today" data-act="goto" data-target="today" data-date="${t}">오늘로 돌아가기</button>` : '') +
-    weekStrip(d, 'today') + (lvlSet() ? '' : levelCard()) + goalCard(d) + backupNag() + sessionBlock(d) + morningCard(d) + dietCard(d) + (pre ? prepCard(d) : '');
+    weekStrip(d, 'today') + (lvlSet() ? '' : levelCard()) + (profileSet() ? '' : profileNag()) + goalCard(d) + backupNag() + sessionBlock(d) + morningCard(d) + dietCard(d) + (pre ? prepCard(d) : '');
 }
 
 // ---------- 포커스 모드 ----------
@@ -733,7 +796,7 @@ function viewWeek() {
       <div class="stat num"><b>${f1(s.avg)}</b><span>평균 kg</span><small class="${diff == null ? '' : diff < 0 ? 'down' : 'up'}">${diff == null ? '—' : (diff > 0 ? '▲' : '▼') + Math.abs(diff).toFixed(1)}</small></div>
       <div class="stat num"><b>${s.brownMax ?? '—'}</b><span>완등 최고</span><small>${isNum(s.sleepAvg) ? '수면 ' + s.sleepAvg.toFixed(1) + 'h' : ''}</small></div>
     </section>` +
-    `<section class="card"><div class="card-h"><h2>체중 추이</h2><span class="muted">목표 ${state.settings.targetWeight}kg</span></div>${weightChart()}</section>` +
+    `<section class="card"><div class="card-h"><h2>체중 추이</h2><span class="muted">${weightGoal() ? `목표 ${state.settings.targetWeight}kg` : '체중 ' + GOALS[goalOf()]}</span></div>${weightChart()}</section>` +
     `<section class="card"><div class="card-h"><h2>볼륨 완등 (주차별 최고)</h2></div>${brownChart(mon)}</section>` +
     `<section class="card"><div class="card-h"><h2>다음 주 권장사항</h2>${v.ended ? '' : '<span class="muted">현재까지 기록 기준</span>'}</div>
       ${v.cards.map(c => `<div class="vcard ${c.lv}"><span class="v-ic">${ic(c.icon)}</span><div><b>${c.t}</b><p>${c.b}</p>${c.act ? `<button class="chipbtn ${c.act.on ? 'on' : ''}" data-act="hold" data-mon="${c.act.mon}" aria-pressed="${c.act.on}">${c.act.on ? '적용됨 · 다음 주 강도 유지' : '다음 주에 적용하기'}</button>` : ''}</div></div>`).join('')}
@@ -763,17 +826,22 @@ function analysisCard(mon) {
 function buildReport(mon) {
   const st = state.settings, w = weekNo(mon), v = verdict(mon), s = v.s, cfg = weekCfg(w);
   const L = [];
-  L.push(`# 볼더링 복귀 트래커 주간 리포트 — ${w < 1 ? '준비 기간' : w + '주차'} (${mon} ~ ${addDays(mon, 6)})`);
+  L.push(`# 볼더링 트래커 주간 리포트 — ${w < 1 ? '준비 기간' : w + '주차'} (${mon} ~ ${addDays(mon, 6)})`);
   L.push('');
   L.push('## 분석 요청');
-  L.push('아래는 내 볼더링 복귀 트레이닝·식단 트래커의 한 주 기록이다. 코치 관점에서 분석해줘.');
+  L.push('아래는 내 볼더링 트레이닝·식단 트래커의 한 주 기록이다. 코치 관점에서 분석해줘.');
   L.push('1. 이번 주 잘한 점과 문제점 (체중 추세, 세션 수행률, 강도 배치, 손가락·팔꿈치 부상 신호, 수면)');
   L.push('2. 앱의 자동 판정이 적절한지, 놓친 신호가 있는지');
   L.push('3. 다음 주 구체적 조정안 (세션 배치, 행보드·풀업 강도, 식단 칼로리·단백질)');
-  L.push(`4. 4주 목표(원데이 볼륨 ${grades().vol} 8개 이상 + ${grades().proj} 시도, 체중 ${st.targetWeight}kg) 달성 가능성`);
+  L.push(`4. 4주 목표(원데이 볼륨 ${grades().vol} 8개 이상 + ${grades().proj} 시도${weightGoal() ? `, 체중 ${st.targetWeight}kg` : ''}) 달성 가능성`);
   L.push('');
   L.push('## 계획 요약');
-  L.push(`- 목표: ${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg (주 0.5kg 감량), 단백질 ${PLAN.meals.proteinTarget}g/일, 암장 날 ${PLAN.meals.kcalTarget.gym}kcal · 쉬는 날 ${PLAN.meals.kcalTarget.rest}kcal`);
+  {
+    const tg = targets(mon), wk = Math.max(1, diffDays(st.targetDate, st.startDate) / 7);
+    const who = [st.sex === 'm' ? '남' : st.sex === 'f' ? '여' : '', isNum(st.age) ? st.age + '세' : '', isNum(st.heightCm) ? st.heightCm + 'cm' : ''].filter(Boolean).join(' ');
+    L.push(`- 나: ${who || '정보 없음'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}`);
+    L.push(`- 식단 목표: 단백질 ${tg.protein}g/일, 암장 날 ${tg.gym}kcal · 쉬는 날 ${tg.rest}kcal${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? ' (직접 지정)' : ' (자동 계산)'}`);
+  }
   L.push(`- 레벨: V${lvl()} (${tier().range} ${tier().name}) · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
   L.push('- 주간 묶음: 한계(고강도) · 근력(고강도, 집 C 대체 가능) · 볼륨 · 집 A · 집 B · 휴식 2. 요일 자유, 고강도 연속 금지');
   L.push(`- 이번 주 진행표: ${cfg.goal} / 행보드 ${hangFor(mon).skip ? '생략' : hangFor(mon).text} / 풀업 ${pullFor(mon)}${cfg.recovery ? ' / 회복 주간' : ''}`);
@@ -810,7 +878,7 @@ function buildReport(mon) {
     L.push(`| ${wn < 1 ? '준비' : wn + '주'} | ${md(m)}~${md(addDays(m, 6))} | ${f1(ws.avg)} | ${ws.gymDone} | ${ws.brownMax ?? '-'} | ${[ws.finger ? '손가락' : '', ws.elbow ? '팔꿈치' : ''].filter(Boolean).join(',') || '-'} | ${ws.short}일 |`);
   }
   L.push('');
-  L.push(`(생성: ${todayStr()} · 볼더링 복귀 트래커)`);
+  L.push(`(생성: ${todayStr()} · 볼더링 트래커)`);
   return L.join('\n');
 }
 async function reportAction(kind, mon) {
@@ -848,17 +916,34 @@ function downloadBlob(text, name, type) {
 // ---------- 탭: 설정 ----------
 function viewSettings() {
   const st = state.settings;
-  const num = (k, label, step) => `<label class="field"><span>${label}</span><input type="number" inputmode="decimal" step="${step}" data-field="set:${k}" value="${st[k]}"></label>`;
+  const num = (k, label, step, ph = '') => `<label class="field"><span>${label}</span><input type="number" inputmode="decimal" step="${step}" data-field="set:${k}" value="${isNum(st[k]) ? st[k] : ''}" placeholder="${ph}"></label>`;
+  const seg = (k, opts) => `<div class="seg theme-seg" role="group">${opts.map(([v, l]) => `<button class="${st[k] === v ? 'on' : ''}" data-act="set-v" data-k="${k}" data-v="${v}" aria-pressed="${st[k] === v}">${l}</button>`).join('')}</div>`;
+  const tg = targets(todayStr()), a = tg.auto;
   const lb = state.meta.lastBackup;
   return appbar('<span class="eb-tag">SETTINGS</span> 데이터는 이 기기에만 저장', '설정', null) +
     levelCard() + themeCard() +
-    `<section class="card"><div class="card-h"><h2>목표</h2></div>
+    `<section class="card" id="profile"><div class="card-h"><h2>내 정보</h2><span class="muted">${profileSet() ? '입력됨' : '칼로리 계산에 사용'}</span></div>
+      <h3 class="h3">성별</h3>${seg('sex', [['m', '남성'], ['f', '여성']])}
       <div class="fields2">
+        ${num('age', '나이', 1, '예: 30')}${num('heightCm', '키 (cm)', 0.5, '예: 172')}
+      </div>
+    </section>
+    <section class="card"><div class="card-h"><h2>체중 목표</h2><span class="muted">${GOALS[goalOf()]}</span></div>
+      ${seg('goal', [['cut', '감량'], ['keep', '유지'], ['gain', '증량']])}
+      <div class="fields2">
+        ${num('startWeight', '시작 체중 (kg)', 0.1, '예: 70')}${goalOf() === 'keep' ? '' : num('targetWeight', '목표 체중 (kg)', 0.1, '예: 68')}
         <label class="field"><span>1주차 시작일 (월)</span><input type="date" data-field="set:startDate" value="${st.startDate}"></label>
         <label class="field"><span>목표일</span><input type="date" data-field="set:targetDate" value="${st.targetDate}"></label>
-        ${num('startWeight', '시작 체중 (kg)', 0.1)}${num('targetWeight', '목표 체중 (kg)', 0.1)}
-        ${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '과감량 기준 (kg/주)', 0.1)}
+        ${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '급변 기준 (kg/주)', 0.1)}
       </div>
+      <p class="hint">감량은 주 0.3~0.7kg, 증량은 주 0.2~0.4kg 정도가 손가락·관절 부담 없이 안전합니다.</p>
+    </section>
+    <section class="card"><div class="card-h"><h2>식단 목표</h2><span class="muted">${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? '직접 지정' : '자동'}</span></div>
+      <div class="fields2">
+        ${num('kcalGym', '암장 날 칼로리', 50, `자동 ${a.gym}`)}${num('kcalRest', '쉬는 날 칼로리', 50, `자동 ${a.rest}`)}
+        ${num('protein', '단백질 (g/일)', 5, `자동 ${a.protein}`)}
+      </div>
+      <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? '기초대사량(성별·나이·키·최근 7일 체중) × 활동량' + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>
     </section>
     <section class="card"><div class="card-h"><h2>백업</h2><span class="muted">마지막 ${lb ? md(lb) : '없음'}</span></div>
       <p class="hint">브라우저 데이터를 지우면 기록이 사라집니다. 주 1회 내보내기를 권합니다.</p>
@@ -876,8 +961,8 @@ function viewSettings() {
       </tbody></table></div>
     </section>
     <section class="card"><div class="card-h"><h2>자동 조정 규칙</h2></div><ul class="plain rules">
-      <li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 1/3공기 감소</li>
-      <li>주 ${st.fastLossKg}kg 초과 감량 또는 힘 떨어짐 → 다음 주 암장 날 운동 전 식빵 1장/김밥 1줄</li>
+      ${goalOf() === 'gain' ? `<li>주 평균 체중이 ${st.plateauKg}kg 미만으로 늘면 → 다음 주 끼니마다 밥 1/3공기 추가</li>` : goalOf() === 'cut' ? `<li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 1/3공기 감소</li>` : `<li>주 평균 체중이 ${st.fastLossKg}kg 넘게 변하면 알림</li>`}
+      <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 운동 전 식빵 1장/김밥 1줄</li>
       <li>손가락 통증 → 그 주 행보드 제외, 다음 주 한 단계 후퇴</li>
       <li>팔꿈치 통증 → 7일간 풀업·록오프 제외</li>
       <li>바쁜 주 → 한계+볼륨만</li>
@@ -983,7 +1068,7 @@ document.addEventListener('click', e => {
     case 'adj': {
       const x = dayW(d), k = b.dataset.k, step = +b.dataset.step;
       // 비어 있을 때 처음 누르면 기준값(전날 체중 / 수면 7시간)을 그대로 채움
-      if (!isNum(x[k])) x[k] = k === 'weight' ? (lastWeightBefore(addDays(d, -1)) ?? state.settings.startWeight) : 7;
+      if (!isNum(x[k])) x[k] = k === 'weight' ? (lastWeightBefore(addDays(d, -1)) ?? state.settings.startWeight ?? 60) : 7;
       else x[k] = Math.max(0, Math.round((x[k] + step) * 10) / 10);
       return commit();
     }
@@ -1001,6 +1086,7 @@ document.addEventListener('click', e => {
       return toast(`V${v} · ${tier().name} 프로그램으로 바꿨어요`);
     }
     case 'prep-fold': state.meta.prepFold = !state.meta.prepFold; return commit();
+    case 'set-v': state.settings[b.dataset.k] = b.dataset.v; return commit();
     case 'theme': state.meta.theme = b.dataset.v; save(); applyTheme(); return render();
     case 'export': return exportData();
     case 'import': return document.getElementById('importFile').click();
@@ -1017,6 +1103,8 @@ document.addEventListener('change', e => {
   if (!f) return;
   if (f.startsWith('set:')) {
     const k = f.slice(4), v = el.type === 'number' ? parseFloat(el.value) : el.value;
+    const optional = ['age', 'heightCm', 'startWeight', 'targetWeight', 'kcalGym', 'kcalRest', 'protein'];
+    if (el.value === '' && optional.includes(k)) { state.settings[k] = null; return commit(); }
     if ((el.type === 'number' && !isNum(v)) || v === '') { toast('값을 확인해 주세요'); return render(); }
     state.settings[k] = v;
     return commit();

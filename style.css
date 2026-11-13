@@ -669,3 +669,6 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .runner .r-tempo i.on { background: var(--pc); color: #111; }
 .gd-list.lvl li::before { content: ''; position: absolute; left: 7px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
 .gd-list.lvl li.me::before { background: var(--accent); }
+
+/* 설정: 토글 아래 입력칸 간격 */
+.seg.theme-seg + .fields2 { margin-top: 14px; }
