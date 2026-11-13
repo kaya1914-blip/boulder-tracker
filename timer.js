@@ -27,15 +27,35 @@ function board() {
 }
 function hangTodayCfg(date, sets) {
   const h = hangFor(date), lvl = isNum(h.lvl) ? h.lvl : 0;
-  const c = { kind: 'hang', title: '행보드 · 오늘 권장', prep: 10, work: PLAN.hangSeconds[lvl], rest: 0, reps: 1, sets: sets || 5, setRest: 150, load: h.skip ? '' : h.short, grips: [] };
+  const c = { kind: 'hang', title: '행보드 · 오늘 권장', prep: 10, work: tier().hangSeconds[lvl], rest: 0, reps: 1, sets: sets || 5, setRest: 150, load: h.skip ? '' : h.short, grips: [] };
   fixGrips(c);
   return c;
 }
 
 // ---------- 단계 만들기 ----------
+// 템포 카운터: 한 회 = tempo 구간들(예: 내리기 3초 · 정지 1초 · 올리기 1초). 좌우(side)·묶음(parts: Y·T·W)을 차례로.
+function buildTempo(c) {
+  const ph = [{ t: 'prep', d: c.prep || 5, set: 1, rep: 1 }];
+  const sides = c.side ? ['왼쪽', '오른쪽'] : [''], parts = c.parts && c.parts.length ? c.parts : [''];
+  for (let s = 1; s <= c.sets; s++) {
+    sides.forEach((sd, si) => {
+      if (si > 0) ph.push({ t: 'rest', d: 8, set: s, rep: c.reps, note: '반대쪽', side: sd });
+      parts.forEach((pt, pi) => {
+        if (pi > 0) ph.push({ t: 'rest', d: 3, set: s, rep: c.reps, note: pt + ' 준비', part: pt, side: sd });
+        for (let r = 1; r <= c.reps; r++) c.tempo.forEach(([lab, d], k) => ph.push({ t: 'work', d, set: s, rep: r, seg: k, lab, part: pt, side: sd }));
+      });
+    });
+    if (s < c.sets && c.setRest) ph.push({ t: 'setrest', d: c.setRest, set: s, rep: c.reps });
+  }
+  return ph;
+}
+const KCOUNT = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물'];
+const countWord = n => KCOUNT[n - 1] || String(n);
+
 function buildPhases(c) {
   const ph = [];
   if (c.kind === 'rest') { ph.push({ t: 'rest', d: c.work }); return ph; }
+  if (c.kind === 'tempo') return buildTempo(c);
   if (c.prep) ph.push({ t: 'prep', d: c.prep, set: 1, rep: 1 });
   for (let s = 1; s <= c.sets; s++) {
     for (let r = 1; r <= c.reps; r++) {
@@ -49,8 +69,11 @@ function buildPhases(c) {
 const totalSec = c => buildPhases(Object.assign({ kind: 'hang' }, c)).reduce((a, p) => a + p.d, 0);
 function phaseName(p, c) {
   if (p.t === 'prep') return ['READY', '준비'];
+  if (c.kind === 'tempo' && p.t === 'work') return ['TEMPO', p.lab];
+  if (c.kind === 'tempo' && p.t === 'rest') return ['SWITCH', p.note || '전환'];
   if (p.t === 'work') return c.kind === 'hang' ? ['HANG', '매달리기'] : ['WORK', c.workLabel || '운동'];
-  if (p.t === 'setrest') return [c.kind === 'hang' ? 'SET REST' : 'ROUND REST', c.kind === 'hang' ? '세트 휴식' : '라운드 휴식'];
+  const bySet = c.kind === 'hang' || c.kind === 'tempo';
+  if (p.t === 'setrest') return [bySet ? 'SET REST' : 'ROUND REST', bySet ? '세트 휴식' : '라운드 휴식'];
   return ['REST', '휴식'];
 }
 
@@ -161,19 +184,34 @@ function beginPhase(at) {
   const c = RUN.cfg, single = c.kind === 'rest';
   setText('rSet', single ? '' : `${p.set}/${c.sets}`);
   setText('rRep', single ? '' : `${p.rep}/${c.reps}`);
-  const grip = c.kind === 'hang' ? [c.grips[(p.t === 'setrest' ? p.set : p.set - 1)] || '', c.load].filter(Boolean).join(' · ') : (c.title || '');
+  const grip = c.kind === 'tempo' ? ([p.part, p.side].filter(Boolean).join(' · ') || c.title || '') : c.kind === 'hang' ? [c.grips[(p.t === 'setrest' ? p.set : p.set - 1)] || '', c.load].filter(Boolean).join(' · ') : (c.title || '');
   setText('rGrip', p.t === 'setrest' && c.kind === 'hang' ? '다음 세트 · ' + grip : grip);
   const nx = RUN.phases[RUN.i + 1];
   setText('rNext', nx ? `다음 · ${phaseName(nx, c)[1]} ${durText(nx.d)}` : single ? '' : '마지막');
   document.getElementById('rPlus').hidden = p.t === 'work' || p.t === 'prep';
   // 신호
   const prev = RUN.phases[RUN.i - 1];
+  if (c.kind === 'tempo') return tempoSignal(p, prev, c);
   if (prev && (prev.t === 'rest' || prev.t === 'setrest') && p.t === 'work' && prev.d >= 20) { endAlarm(T().endAlert === 'repeat' ? 2 : 1); }
   else if (RUN.i > 0) flashScreen();
   if (p.t === 'work') { beep(1046, 0.4, 0.35); buzz(250); say(c.kind === 'hang' ? '매달려' : '시작'); }
   else if (p.t === 'rest') { beep(587, 0.3); buzz([80, 60, 80]); if (p.d >= 5 || c.kind === 'rest') say('휴식'); }
   else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${c.kind === 'hang' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`); }
   else if (p.t === 'prep') say('준비');
+}
+function tempoSignal(p, prev, c) {
+  document.querySelectorAll('#rTempo i').forEach(e => e.classList.toggle('on', p.t === 'work' && +e.dataset.k === p.seg));
+  if (p.t === 'work') {
+    if (prev && prev.t === 'setrest' && prev.d >= 20) endAlarm(1);
+    if (p.seg === 0) {
+      beep(1046, 0.12, 0.3); buzz(60);
+      const head = p.rep === 1 ? [p.part, p.side].filter(Boolean).join(' ') : '';
+      say((head ? head + ', ' : '') + countWord(p.rep));
+    } else beep(/정지/.test(p.lab) ? 660 : 880, 0.1, 0.25);
+    if (p.rep === c.reps && p.seg === c.tempo.length - 1) flashScreen();
+  } else if (p.t === 'rest') { beep(587, 0.25); buzz([80, 60, 80]); say(p.note || '전환'); }
+  else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${p.set}세트 끝. 휴식 ${durText(p.d)}`); }
+  else if (p.t === 'prep') say(`준비. ${c.tempo.map(([l, d]) => `${l} ${d}초`).join(', ')}`);
 }
 function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 function remainingTotal(now) {
@@ -198,11 +236,15 @@ function tick() {
   const sec = Math.ceil(rem / 1000);
   if (sec !== RUN.lastSec) {
     RUN.lastSec = sec;
-    setText('rNum', p.d >= 60 && sec >= 60 ? mmss(sec) : String(Math.max(0, sec)));
-    document.getElementById('rNum').classList.toggle('long', p.d >= 60 && sec >= 60);
+    const tw = RUN.cfg.kind === 'tempo' && p.t === 'work';
+    setText('rNum', tw ? String(p.rep) : p.d >= 60 && sec >= 60 ? mmss(sec) : String(Math.max(0, sec)));
+    if (tw) setText('rSub', `${p.lab} · ${Math.max(0, sec)}초`);
+    document.getElementById('rNum').classList.toggle('long', !tw && p.d >= 60 && sec >= 60);
     setText('rTotal', mmss(remainingTotal(now)));
     if (!RUN.paused && sec === 10 && p.d >= 30 && p.t !== 'work') say('10초 남았어요');
-    if (!RUN.paused && sec <= 3 && sec > 0 && p.d > 3) { beep(880, 0.09); if (sec === 3 && RUN.phases[RUN.i + 1] && RUN.phases[RUN.i + 1].t === 'work' && p.t !== 'prep') say('셋'); }
+    if (tw) { if (!RUN.paused && sec > 0 && sec < p.d) beep(1500, 0.03, 0.12); }
+    else if (!RUN.paused && p.t === 'work' && RUN.cfg.kind === 'interval' && p.d >= 20 && sec === Math.floor(p.d / 2) && sec > 3) say('절반');
+    if (!tw && !RUN.paused && sec <= 3 && sec > 0 && p.d > 3) { beep(880, 0.09); if (sec === 3 && RUN.phases[RUN.i + 1] && RUN.phases[RUN.i + 1].t === 'work' && p.t !== 'prep') say('셋'); }
   }
   const arc = document.getElementById('rArc');
   if (arc) arc.style.strokeDashoffset = String(ARC_C * (1 - Math.max(0, Math.min(1, rem / (p.d * 1000)))));
@@ -247,6 +289,7 @@ function buildRunner() {
       <div class="r-center"><div class="r-phase" id="rPhase"></div><div class="r-num" id="rNum" role="timer" aria-live="off"></div><div class="r-sub" id="rSub"></div></div>
     </div>
     <div class="r-grip" id="rGrip"></div>
+    ${c.kind === 'tempo' ? `<div class="r-tempo" id="rTempo">${c.tempo.map(([l, d], k) => `<i data-k="${k}">${esc(l)} ${d}초</i>`).join('')}</div>` : ''}
     <div class="r-next" id="rNext"></div>
     <div class="r-ctrl">
       <button class="r-icon lg" data-act="r-prev" aria-label="이전 단계">${ic('chevL')}</button>
@@ -274,7 +317,7 @@ function finishRun(stopped) {
       x.hangLog = x.hangLog || [];
       const now = new Date();
       x.hangLog.push({ at: `${pad(now.getHours())}:${pad(now.getMinutes())}`, title: c.title || '행보드', work: c.work, reps: c.reps, sets: c.sets, setsDone, board: board().short, grip: [...new Set(c.grips)].join('/'), load: c.load || '' });
-      if (!x.hang && c.load && PLAN.hangLevels.includes(c.load)) x.hang = c.load;
+      if (!x.hang && c.load && tier().hangLevels.includes(c.load)) x.hang = c.load;
       saved = `${md(date)} 기록에 저장했어요`;
     }
     if (RUN.from && !stopped) { x.checks = x.checks || {}; x.checks[RUN.from.id] = true; saved = saved || '세션 단계를 완료로 표시했어요'; }
@@ -329,7 +372,7 @@ function viewTimer() {
   let body = '';
   if (t.mode === 'hang') {
     const c = t.hang, h = hangFor(todayStr());
-    const today = { id: 'today', name: '오늘 권장', sub: h.skip ? '이번 주 행보드 생략' : `${PLAN.hangSeconds[h.lvl]}초 × 5 · ${h.short}` };
+    const today = { id: 'today', name: '오늘 권장', sub: h.skip ? '이번 주 행보드 생략' : `${tier().hangSeconds[h.lvl]}초 × 5 · ${h.short}` };
     const tot = totalSec(c), hangT = c.work * c.reps * c.sets;
     body = `${h.skip ? `<p class="warn">${ic('alert')}${h.skip}. 그래도 쓰려면 강도를 낮게 잡으세요.</p>` : ''}
       ${liveFlags(todayStr()).fingerWeek ? `<p class="warn">${ic('finger')}이번 주 손가락 통증 기록이 있습니다. 행보드는 쉬는 걸 권합니다.</p>` : ''}

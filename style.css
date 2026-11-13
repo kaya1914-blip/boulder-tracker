@@ -640,3 +640,32 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .gd-list.how li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 1px; width: 19px; height: 19px; border-radius: 50%; background: var(--surface-3); font-family: var(--num); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .gd-list.cue li::before, .gd-list.avoid li::before { content: ''; position: absolute; left: 7px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .gd-list.avoid li::before { background: var(--amber); }
+
+/* 레벨 선택 */
+.eb-tag.lv { color: var(--ink-2); background: var(--surface-3); }
+.lv-card .card-h h2 .ic { width: 18px; height: 18px; color: var(--accent); }
+.lv-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 12px; }
+.lv-btn { min-height: 44px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font-family: var(--num); font-weight: 800; font-size: 15px; }
+.lv-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.lv-info { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.lv-info > b { font-size: 14.5px; }
+.lv-info > p { margin: 4px 0 6px; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.lv-info .plain li { font-size: 13px; padding: 6px 0; }
+
+/* 접기 */
+.fold-btn { width: 32px; height: 32px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); display: grid; place-items: center; }
+.fold-btn .ic { width: 16px; height: 16px; transform: rotate(90deg); transition: transform .2s; }
+.fold-btn.open .ic { transform: rotate(-90deg); }
+.card.folded .card-h { margin-bottom: 0; }
+
+/* 운동 방법 · 레벨별 */
+.gd-h.lvh { color: var(--accent); }
+.gd-list.lvl li { color: var(--muted); }
+.gd-list.lvl li.me { color: var(--ink); font-weight: 700; }
+
+/* 템포 카운터 */
+.runner .r-tempo { display: flex; justify-content: center; gap: 6px; margin-top: 4px; min-height: 22px; flex-wrap: wrap; padding: 0 16px; }
+.runner .r-tempo i { font-style: normal; font-size: 12.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--surface-3); color: var(--muted); }
+.runner .r-tempo i.on { background: var(--pc); color: #111; }
+.gd-list.lvl li::before { content: ''; position: absolute; left: 7px; top: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+.gd-list.lvl li.me::before { background: var(--accent); }
