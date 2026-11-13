@@ -132,8 +132,28 @@ function levelName() {
   const i = state.settings.gradeColor, c = isNum(i) && cs[i] && cs[i].lo === lvl() ? cs[i] : colorAt(lvl());
   return c.n;
 }
+// 고른 색의 V 범위 글자 (색 기준일 때)
+function levelV() {
+  const cs = sysColors();
+  if (!cs) return `V${lvl()}`;
+  const c = cs.find(x => x.n === levelName()) || colorAt(lvl());
+  return c.label || (c.hi >= 10 ? `V${c.lo}+` : vRange(c.lo, c.hi));
+}
 // 레벨에 맞춘 문제 등급: 한계(proj) · 볼륨(vol) · 쉬운(easy) · 워밍업(warm)
+// 색 기준에서 지금 레벨의 색 번호
+function colorIdx(L = lvl()) {
+  const cs = sysColors(), i = state.settings.gradeColor;
+  if (isNum(i) && cs[i] && cs[i].lo === L) return i;
+  return cs.indexOf(colorAt(L));
+}
 function grades(L = lvl()) {
+  const cs = sysColors();
+  if (cs) {
+    // 색은 한 색이 V 여러 단계에 걸칠 수 있어서 색 단위로 계산: 한계 = 내 색~다음 색, 볼륨 = 두 색 아래~한 색 아래
+    const i = colorIdx(L), n = k => cs[Math.max(0, Math.min(cs.length - 1, k))].n;
+    const rg = (a2, b2) => (n(a2) === n(b2) ? n(a2) : `${n(a2)}~${n(b2)}`);
+    return { proj: rg(i, i + 1), vol: rg(i - 2, i - 1), easy: rg(i - 3, i - 2), warm: i <= 3 ? n(0) : `${n(i - 3)} 이하` };
+  }
   const top = gradeSys() === 'v' ? 'V10+' : gName(10);
   return { proj: L >= 10 ? top : gRange(L, L + 1), vol: gRange(L - 2, L - 1), easy: gRange(L - 3, L - 2), warm: L <= 3 ? gName(0) : `${gName(L - 3)} 이하` };
 }
@@ -530,11 +550,11 @@ function levelCard() {
   if (!cs) btns = `<div class="lv-grid" role="group" aria-label="레벨 선택">${Array.from({ length: 11 }, (_, v) => `<button class="lv-btn ${set && v === L ? 'on' : ''}" data-act="level" data-v="${v}" aria-pressed="${set && v === L}">V${v}</button>`).join('')}</div>`;
   else {
     const curName = levelName();
-    btns = `<div class="lv-grid colors" role="group" aria-label="색 선택">${cs.map((c, i) => { const on = set && c.lo === L && c.n === curName; return `<button class="lv-btn col ${on ? 'on' : ''}" data-act="level-c" data-i="${i}" aria-pressed="${on}"><i class="sw" style="background:${c.hex}"></i><b>${c.n}</b><small>${c.hi >= 10 ? `V${c.lo}+` : vRange(c.lo, c.hi)}</small></button>`; }).join('')}</div>
+    btns = `<div class="lv-grid colors" role="group" aria-label="색 선택">${cs.map((c, i) => { const on = set && c.lo === L && c.n === curName; return `<button class="lv-btn col ${on ? 'on' : ''}" data-act="level-c" data-i="${i}" aria-pressed="${on}"><i class="sw" style="background:${c.hex}"></i><b>${c.n}</b><small>${c.label || (c.hi >= 10 ? `V${c.lo}+` : vRange(c.lo, c.hi))}</small></button>`; }).join('')}</div>
       <p class="hint">${PLAN.gradeSystems[sys].note}</p>`;
   }
   return `<section class="card lv-card" id="level">
-    <div class="card-h"><h2>${ic('target')}내 클라이밍 레벨</h2><span class="muted">${set ? `${levelName()}${cs ? ` (V${L})` : ''} · ${t.name}` : '아직 안 골랐어요'}</span></div>
+    <div class="card-h"><h2>${ic('target')}내 클라이밍 레벨</h2><span class="muted">${set ? `${levelName()}${cs ? ` (${levelV()})` : ''} · ${t.name}` : '아직 안 골랐어요'}</span></div>
     <p class="hint"><b>대부분 완등할 수 있는 가장 높은 등급</b>을 고르세요. 기준은 자연 바위 V 등급이나 다니는 암장 색 중 편한 쪽으로 바꿀 수 있습니다. 문제 난이도, 행보드, 풀업, 록오프, 집 운동 횟수와 변형이 레벨에 맞게 바뀝니다.</p>
     ${sysSeg}
     ${btns}
@@ -1127,7 +1147,7 @@ document.addEventListener('click', e => {
     case 'level-c': {
       const i = +b.dataset.i, c = sysColors()[i];
       state.settings.level = c.lo; state.settings.gradeColor = i; commit();
-      return toast(`${c.n} (V${c.lo}) · ${tier().name} 프로그램으로 바꿨어요`);
+      return toast(`${c.n} (${c.label || vRange(c.lo, c.hi)}) · ${tier().name} 프로그램으로 바꿨어요`);
     }
     case 'grade-sys': state.settings.gradeSys = b.dataset.v; state.settings.gradeColor = null; return commit();
     case 'prep-fold': state.meta.prepFold = !state.meta.prepFold; return commit();
