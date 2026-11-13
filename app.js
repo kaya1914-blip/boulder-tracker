@@ -159,23 +159,20 @@ function getSteps(sid, date) {
   const list = (PLAN.steps[sid] || []).map(st => {
     const o = { id: st.id, tag: st.tag, tm: st.tm ? Object.assign({}, st.tm) : null };
     if (st.ex) {
-      let { n, s, r, rest, reps } = st.ex;
+      let { n, s, r, rest, reps, side, tip } = st.ex;
       if (home && reps && (mode === 'reps' || mode === 'sets')) r = bump(r, 2);
       if (home && mode === 'sets') s += 1;
       if (rec) { s = Math.min(s, 2); if (sid === 'homeC' && st.id === 'p') { s = 3; r = '4'; } }
       o.t = `${n} ${s}×${r}`;
-      o.d = rest ? `휴식 ${rest}` : '';
+      o.d = [rest ? `휴식 ${rest}` : '', tip].filter(Boolean).join(' · ');
       if (home && !rec && mode === 'sets') o.note = '세트 +1';
       else if (home && !rec && reps && mode === 'reps') o.note = '+2회';
       if (rec) o.note = '회복 주간';
-      const light = state.settings.dumbbellKg <= 6 && PLAN.lightDumbbell[sid + ':' + st.id];
-      if (light) {
-        if (light.r) o.t = `${n} ${s}×${rec ? r : light.r}`;
-        o.d = [o.d, light.tip].filter(Boolean).join(' · ');
-      }
       if (/초/.test(r)) {
-        const secs = Math.max(...(r.match(/\d+/g) || ['30']).map(Number));
-        o.tm = { kind: 'interval', title: n, work: secs, rest: restSec(rest) || 30, reps: 1, sets: s, setRest: restSec(rest) || 30 };
+        const secs = Math.max(...(r.match(/\d+/g) || ['30']).map(Number)), rs = restSec(rest) || 30;
+        o.tm = side
+          ? { kind: 'interval', title: `${n} (왼쪽 → 오른쪽)`, work: secs, rest: 10, reps: 2, sets: s, setRest: rs }
+          : { kind: 'interval', title: n, work: secs, rest: rs, reps: 1, sets: s, setRest: rs };
       } else if (rest) o.tm = { kind: 'rest', work: restSec(rest), title: `${n} 세트 휴식` };
     } else {
       o.t = st.t.replace('{pull}', pull);
@@ -805,7 +802,7 @@ function viewSettings() {
         <label class="field"><span>1주차 시작일 (월)</span><input type="date" data-field="set:startDate" value="${st.startDate}"></label>
         <label class="field"><span>목표일</span><input type="date" data-field="set:targetDate" value="${st.targetDate}"></label>
         ${num('startWeight', '시작 체중 (kg)', 0.1)}${num('targetWeight', '목표 체중 (kg)', 0.1)}
-        ${num('dumbbellKg', '집 덤벨 무게 (kg)', 0.5)}${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '과감량 기준 (kg/주)', 0.1)}
+        ${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '과감량 기준 (kg/주)', 0.1)}
       </div>
     </section>
     <section class="card"><div class="card-h"><h2>백업</h2><span class="muted">마지막 ${lb ? md(lb) : '없음'}</span></div>

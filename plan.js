@@ -11,7 +11,6 @@ const PLAN = {
     fastLossKg: 0.8,           // 주 평균 감량이 이 값 초과면 과감량
     shortSleepH: 6,
     shortSleepDays: 3,
-    dumbbellKg: 5,             // 집 덤벨 무게 (6kg 이하면 가벼운 덤벨용 방법으로 바꿔 보여줌)
   },
 
   // 한 주에 채울 세션 묶음 (str 슬롯은 근력 또는 집 C)
@@ -31,9 +30,9 @@ const PLAN = {
     limit: { name: '한계 볼더링', short: '한계', desc: '어려운 문제 집중 공략', place: '암장', min: 120, intensity: 'high', slot: 'limit', gym: true, icon: 'bolt' },
     strength: { name: '손가락 + 당기기 근력', short: '근력', desc: '행보드 · 풀업 · 록오프', place: '암장', min: 90, intensity: 'high', slot: 'str', gym: true, icon: 'finger' },
     volume: { name: '볼륨 볼더링', short: '볼륨', desc: '갈색 많이 + 지구력', place: '암장', min: 150, intensity: 'mid', slot: 'volume', gym: true, icon: 'stack' },
-    homeA: { name: '집 A · 밀기·어깨·손목', short: '집 A', desc: '밀기 · 어깨 · 손목 · 코어', place: '집', min: 45, intensity: 'mid', slot: 'homeA', gym: false, icon: 'dumbbell' },
-    homeB: { name: '집 B · 코어 + 모빌리티', short: '집 B', desc: '코어 · 고관절 스트레칭', place: '집', min: 30, intensity: 'low', slot: 'homeB', gym: false, icon: 'leaf' },
-    homeC: { name: '집 C · 근력 대체', short: '집 C', desc: '풀업 · 록오프 (근력 대체)', place: '집', min: 50, intensity: 'high', slot: 'str', gym: false, icon: 'pull' },
+    homeA: { name: '집 A · 밀기·어깨·손목', short: '집 A', desc: '푸시업 · 파이크 · Y·T·W · 손목 · 코어', place: '집', min: 40, intensity: 'mid', slot: 'homeA', gym: false, icon: 'dumbbell' },
+    homeB: { name: '집 B · 코어 + 모빌리티', short: '집 B', desc: '하체 · 코어 · 고관절·흉추 풀기', place: '집', min: 35, intensity: 'low', slot: 'homeB', gym: false, icon: 'leaf' },
+    homeC: { name: '집 C · 근력 대체', short: '집 C', desc: '풀업 · 록오프 · 네거티브 (근력 대체)', place: '집', min: 50, intensity: 'high', slot: 'str', gym: false, icon: 'pull' },
     rest: { name: '휴식', short: '휴식', desc: '완전 휴식 · 회복', place: '회복', min: 0, intensity: 'rest', slot: null, gym: false, icon: 'moon' },
   },
 
@@ -74,47 +73,42 @@ const PLAN = {
       { id: 'n', t: '지구력 20분', d: '보라 4문제 연속(사이 1분) × 3라운드 · 라운드 간 4분', deload: '2라운드', tm: { kind: 'interval', title: '지구력 서킷', work: 45, rest: 60, reps: 4, sets: 3, setRest: 240, workLabel: '등반' } },
       { id: 'x', t: '정리 15분', d: '폼롤러 · 전완·어깨 스트레칭' },
     ],
+    // 집 운동 장비: 맨몸 + 5kg 덤벨 1개 + 문틀 철봉 (+ 의자·벽). 순서: 워밍업 → 큰 근육·복합 → 작은 근육·안정화 → 코어 → 정리
+    // ex 옵션: reps(2주차·3주차 +2회 대상) · side(초 단위 좌우 운동: 타이머가 좌·우 한 번씩 = 1세트) · tip(요령, 휴식 옆에 표시)
     homeA: [
-      { id: 'w', t: '워밍업 5분', d: '팔 돌리기 · 스캡 풀업 2×8 · 데드행 20초×2' },
-      { id: 'pu', ex: { n: '푸시업', s: 3, r: '12~15', rest: '60초', reps: true } },
-      { id: 'sp', ex: { n: '덤벨 숄더프레스', s: 3, r: '10', rest: '60초', reps: true } },
-      { id: 'er', ex: { n: '엎드려 T레이즈', s: 3, r: '12', rest: '30초' } },
-      { id: 'yr', ex: { n: '엎드려 Y레이즈', s: 3, r: '12', rest: '45초' } },
-      { id: 'rc', ex: { n: '리버스 리스트컬', s: 3, r: '15', rest: '45초' } },
-      { id: 'pr', ex: { n: '덤벨 해머컬', s: 2, r: '12', rest: '45초' } },
+      { id: 'w', t: '워밍업 5분', d: '팔·손목 돌리기 · 고양이-소 8회 · 스캡 푸시업 2×10' },
+      { id: 'pu', ex: { n: '푸시업', s: 3, r: '10~12', rest: '90초', reps: true, tip: '3초 내리기 · 바닥 1초 정지' } },
+      { id: 'pk', ex: { n: '파이크 푸시업', s: 3, r: '6~8', rest: '90초', reps: true, tip: '머리가 손 사이 앞으로' } },
+      { id: 'yt', ex: { n: '엎드려 Y·T·W 레이즈', s: 3, r: '각 6', rest: '45초', tip: '맨손 · Y→T→W 이어서 · 매회 2초 정지' } },
+      { id: 'rc', ex: { n: '리버스 리스트컬 좌우', s: 3, r: '10~12', rest: '45초', tip: '5kg · 3초 내리기 · 무거우면 내릴 때만' } },
+      { id: 'ts', ex: { n: '플랭크 숄더탭', s: 3, r: '좌우 10', rest: '45초', reps: true, tip: '골반 흔들림 없이' } },
       { id: 'll', ex: { n: '행잉 니레이즈 → 레그레이즈', s: 3, r: '8~10', rest: '60초' } },
+      { id: 'x', t: '정리 3분', d: '문틀 가슴 스트레칭 · 전완 스트레칭 각 30초' },
     ],
     homeB: [
-      { id: 'db', ex: { n: '데드버그', s: 3, r: '10' } },
-      { id: 'sp', ex: { n: '사이드 플랭크 좌우', s: 3, r: '30초' } },
-      { id: 'hh', ex: { n: '할로우 홀드', s: 3, r: '20~30초' } },
-      { id: 'gs', ex: { n: '고블릿 스쿼트', s: 3, r: '10' } },
-      { id: 'st', t: '개구리·피전 스트레칭', d: '각 1분 × 2', tm: { kind: 'interval', title: '스트레칭', work: 60, rest: 10, reps: 4, sets: 1 } },
-      { id: 'dh', ex: { n: '데드행', s: 3, r: '20초' } },
-      { id: 'x', t: '전완·흉추 스트레칭 5분', d: '폼롤러로 등·흉추 풀기' },
+      { id: 'w', t: '몸풀기 5분', d: '고양이-소 10 · 오픈북 좌우 8 · 맨몸 스쿼트 10' },
+      { id: 'gs', ex: { n: '고블릿 스쿼트', s: 3, r: '10', rest: '60초', reps: true, tip: '5kg · 3초 내려가 바닥 2초 정지' } },
+      { id: 'rd', ex: { n: '한 발 루마니안 데드리프트 좌우', s: 3, r: '8', rest: '45초', reps: true, tip: '5kg 반대 손 · 3초 내리기' } },
+      { id: 'db', ex: { n: '데드버그', s: 3, r: '좌우 8', rest: '30초', reps: true, tip: '뻗을 때 길게 내쉬기' } },
+      { id: 'sp', ex: { n: '사이드 플랭크 좌우', s: 3, r: '30초', rest: '30초', side: true } },
+      { id: 'hh', ex: { n: '할로우 홀드', s: 3, r: '20~30초', rest: '30초' } },
+      { id: 'st', t: '개구리·피전 스트레칭', d: '개구리 1분 → 피전 왼쪽 1분 → 오른쪽 1분 · 2바퀴', tm: { kind: 'interval', title: '개구리·피전', work: 60, rest: 10, reps: 3, sets: 2, setRest: 15 } },
+      { id: 'dh', ex: { n: '데드행', s: 2, r: '30초', rest: '30초', tip: '어깨 힘 빼고 늘어뜨리기 (척추 풀기)' } },
+      { id: 'x', t: '흉추·전완 정리 5분', d: '의자 흉추 젖히기 · 문틀 가슴 스트레칭 · 전완 스트레칭' },
     ],
     homeC: [
-      { id: 'w', t: '워밍업 10분', d: '스캡 풀업 · 데드행 · 가벼운 풀업' },
-      { id: 'p', ex: { n: '풀업', s: 5, r: '5', rest: '2~3분' }, tag: 'pull' },
+      { id: 'w', t: '워밍업 10분', d: '팔 돌리기 · 스캡 풀업 2×8 · 데드행 20초 · 쉬운 풀업 2×3' },
+      { id: 'p', ex: { n: '풀업', s: 5, r: '5', rest: '2~3분', tip: '턱 위 1초 정지 · 2초 내리기' }, tag: 'pull' },
       { id: 'l', t: '록오프', d: '90°·120° 각 5초 × 3 · 3세트 · 휴식 2분', tag: 'pull', tm: { kind: 'interval', title: '록오프 90°·120°', work: 5, rest: 10, reps: 6, sets: 3, setRest: 120 } },
       { id: 'ng', ex: { n: '5초 네거티브 풀업', s: 3, r: '3', rest: '2분' }, tag: 'pull' },
-      { id: 'ro', ex: { n: '원암 덤벨 로우 좌우', s: 3, r: '10', rest: '60초' } },
+      { id: 'po', ex: { n: '덤벨 풀오버 (바닥)', s: 3, r: '12', rest: '60초', tip: '5kg 양손 · 3초 내리기' } },
+      { id: 'sc', ex: { n: '스캡 풀업', s: 3, r: '8', rest: '60초', tip: '아래·위 각 2초 정지' } },
       { id: 'll', ex: { n: '행잉 레그레이즈', s: 3, r: '8', rest: '60초' } },
+      { id: 'x', t: '정리 5분', d: '광배·전완 스트레칭 · 가슴 스트레칭' },
     ],
     rest: [
       { id: 'r', t: '완전 휴식', d: '가벼운 걷기 · 스트레칭은 자유' },
     ],
-  },
-
-  // 가벼운 덤벨(6kg 이하)일 때 바꿔 보여줄 횟수·요령
-  lightDumbbell: {
-    'homeA:sp': { r: '12~15', tip: '가벼운 덤벨: 내릴 때 3초 천천히' },
-    'homeA:er': { tip: '덤벨 없이 맨손 (또는 물병)' },
-    'homeA:yr': { tip: '덤벨 없이 맨손' },
-    'homeA:rc': { r: '12', tip: '무거우면 덤벨 손잡이 가운데를 잡고 천천히' },
-    'homeA:pr': { r: '12~15', tip: '가벼운 덤벨: 내릴 때 3초' },
-    'homeB:gs': { r: '15', tip: '가벼운 덤벨: 내려갈 때 3초' },
-    'homeC:ro': { r: '15', tip: '가벼운 덤벨: 당긴 위치에서 1초 멈춤' },
   },
 
   // 행보드 타이머
