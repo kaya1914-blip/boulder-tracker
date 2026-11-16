@@ -162,6 +162,72 @@ async function keepAwake() {
 function releaseAwake() { try { wake && wake.release(); } catch (e) { /* 무시 */ } wake = null; }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && RUN.on && !RUN.done) { keepAwake(); if (actx && actx.state !== 'running') actx.resume().catch(() => {}); } });
 
+
+// ---------- 화면을 꺼도: 잠금화면 표시 · 백그라운드 진행 · 알림 ----------
+// 1) 들리지 않는 소리를 반복 재생 → 폰이 "미디어 재생 중"으로 보고 앱을 덜 재우고, 잠금화면에 미디어 카드가 뜸
+// 2) 잠금화면 카드: 지금 단계·남은 초·세트, 진행 막대, 일시정지/다음/이전 버튼 (Media Session)
+// 3) 화면이 꺼져 있으면 단계가 바뀔 때 알림 + 진동
+// 4) 화면을 다시 켜면 종료 시각 기준으로 남은 시간을 맞춤 (원래부터 RUN.end 기준)
+let keepEl = null, bgTimer = null;
+function makeSilentUrl() {
+  const sr = 8000, len = sr * 10, buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, len * 2, true);
+  for (let i = 0; i < len; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true); // 들리지 않는 크기
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function bgStart() {
+  try { if (!keepEl) { keepEl = new Audio(makeSilentUrl()); keepEl.loop = true; } const pr = keepEl.play(); if (pr) pr.catch(() => {}); } catch (e) { /* 미지원 */ }
+  clearInterval(bgTimer);
+  bgTimer = setInterval(() => { if (document.hidden && RUN.on && !RUN.done) tickCore(); }, 500); // 화면이 꺼지면 rAF가 멈추므로
+  if ('mediaSession' in navigator) {
+    const h = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch (e) { /* 미지원 */ } };
+    h('play', () => { if (RUN.on && !RUN.done && RUN.paused) togglePause(); if (keepEl) keepEl.play().catch(() => {}); lockInfo(performance.now()); });
+    h('pause', () => { if (RUN.on && !RUN.done && !RUN.paused) togglePause(); lockInfo(performance.now()); });
+    h('nexttrack', () => { if (RUN.on && !RUN.done) jump(1); });
+    h('previoustrack', () => { if (RUN.on && !RUN.done) jump(-1); });
+  }
+  askNotify();
+}
+function bgStop() {
+  clearInterval(bgTimer); bgTimer = null;
+  try { if (keepEl) keepEl.pause(); } catch (e) { /* 무시 */ }
+  if ('mediaSession' in navigator) try { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; } catch (e) { /* 무시 */ }
+}
+function lockInfo(now) {
+  if (!('mediaSession' in navigator) || !RUN.on || RUN.done || !window.MediaMetadata) return;
+  const p = RUN.phases[RUN.i], c = RUN.cfg, ko = phaseName(p, c)[1];
+  const left = Math.max(0, (RUN.paused ? RUN.remain : RUN.end - now) / 1000);
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: `${RUN.paused ? '일시정지 · ' : ''}${ko} ${Math.ceil(left)}초`,
+      artist: `${c.kind === 'rest' ? '' : `${p.set}/${c.sets}세트 · `}전체 남은 ${mmss(remainingTotal(now))}`,
+      album: c.title || '볼더링 타이머',
+      artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }, { src: 'icon-192.png', sizes: '192x192', type: 'image/png' }],
+    });
+    navigator.mediaSession.playbackState = RUN.paused ? 'paused' : 'playing';
+    if (navigator.mediaSession.setPositionState) navigator.mediaSession.setPositionState({ duration: p.d, playbackRate: 1, position: Math.min(p.d, Math.max(0, p.d - left)) });
+  } catch (e) { /* 미지원 */ }
+}
+function askNotify() {
+  try {
+    if ('Notification' in window && Notification.permission === 'default' && !state.meta.notifAsked) {
+      state.meta.notifAsked = todayStr(); save();
+      Notification.requestPermission().catch(() => {});
+    }
+  } catch (e) { /* 미지원 */ }
+}
+async function notify(title, body) {
+  if (!document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    const opt = { body, tag: 'bt-timer', renotify: true, vibrate: [300, 120, 300, 120, 500], icon: 'icon-192.png', badge: 'icon-192.png' };
+    if (reg) reg.showNotification(title, opt); else new Notification(title, opt);
+  } catch (e) { /* 미지원 */ }
+}
+
 // ---------- 실행기 ----------
 let RUN = { on: false };
 function startRun(cfg, from) {
@@ -172,6 +238,7 @@ function startRun(cfg, from) {
   buildRunner();
   beginPhase(performance.now());
   keepAwake();
+  bgStart();
   tick();
 }
 function beginPhase(at) {
@@ -191,6 +258,9 @@ function beginPhase(at) {
   document.getElementById('rPlus').hidden = p.t === 'work' || p.t === 'prep';
   // 신호
   const prev = RUN.phases[RUN.i - 1];
+  lockInfo(at);
+  if (p.t === 'work' && prev && (prev.t === 'setrest' || (prev.t === 'rest' && prev.d >= 20))) notify(c.kind === 'hang' ? '매달려!' : '시작!', `${c.title || '타이머'} · ${p.set}/${c.sets}세트`);
+  else if (p.t === 'setrest') notify(`${c.kind === 'hang' || c.kind === 'tempo' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`, `${c.title || '타이머'} · ${p.set}/${c.sets} 끝`);
   if (c.kind === 'tempo') return tempoSignal(p, prev, c);
   if (prev && (prev.t === 'rest' || prev.t === 'setrest') && p.t === 'work' && prev.d >= 20) { endAlarm(T().endAlert === 'repeat' ? 2 : 1); }
   else if (RUN.i > 0) flashScreen();
@@ -219,15 +289,17 @@ function remainingTotal(now) {
   for (let k = RUN.i + 1; k < RUN.phases.length; k++) s += RUN.phases[k].d;
   return s;
 }
-function tick() {
-  if (!RUN.on || RUN.done) return;
+// 화면이 켜져 있으면 매 프레임, 꺼져 있으면 0.5초마다 bgTimer가 tickCore를 부름
+function tick() { if (tickCore()) requestAnimationFrame(tick); }
+function tickCore() {
+  if (!RUN.on || RUN.done) return false;
   const now = performance.now();
   if (!RUN.paused) {
     while (RUN.end - now <= 0) {
       const p = RUN.phases[RUN.i];
       if (p.t === 'work') RUN.work.push(p);
       RUN.i++;
-      if (RUN.i >= RUN.phases.length) return finishRun(false);
+      if (RUN.i >= RUN.phases.length) { finishRun(false); return false; }
       beginPhase(RUN.end);
     }
   }
@@ -236,6 +308,7 @@ function tick() {
   const sec = Math.ceil(rem / 1000);
   if (sec !== RUN.lastSec) {
     RUN.lastSec = sec;
+    lockInfo(now);
     const tw = RUN.cfg.kind === 'tempo' && p.t === 'work';
     setText('rNum', tw ? String(p.rep) : p.d >= 60 && sec >= 60 ? mmss(sec) : String(Math.max(0, sec)));
     if (tw) setText('rSub', `${p.lab} · ${Math.max(0, sec)}초`);
@@ -248,7 +321,7 @@ function tick() {
   }
   const arc = document.getElementById('rArc');
   if (arc) arc.style.strokeDashoffset = String(ARC_C * (1 - Math.max(0, Math.min(1, rem / (p.d * 1000)))));
-  requestAnimationFrame(tick);
+  return true;
 }
 const ARC_R = 136, ARC_C = 2 * Math.PI * ARC_R;
 function togglePause() {
@@ -258,6 +331,7 @@ function togglePause() {
   document.getElementById('runner').classList.toggle('paused', RUN.paused);
   document.getElementById('rPause').innerHTML = RUN.paused ? ic('play', 'fill') : PAUSE_IC;
   RUN.lastSec = null;
+  lockInfo(now);
   if (RUN.paused) say('일시정지');
 }
 function jump(delta) {
@@ -301,8 +375,10 @@ function buildRunner() {
 function finishRun(stopped) {
   RUN.done = true;
   releaseAwake();
+  bgStop();
   const c = RUN.cfg;
   if (!stopped) {
+    notify(c.kind === 'rest' ? '휴식 끝 · 다시 시작!' : '완료!', c.title || '타이머');
     const rep = T().endAlert === 'repeat';
     endAlarm(rep ? 8 : 1);
     say(c.kind === 'rest' ? '휴식 끝. 다시 시작하세요' : '완료. 수고했어요');
@@ -344,6 +420,7 @@ function finishRun(stopped) {
 }
 function closeRunner() {
   stopAlarm();
+  bgStop();
   RUN = { on: false };
   releaseAwake();
   try { speechSynthesis.cancel(); } catch (e) { /* 무시 */ }

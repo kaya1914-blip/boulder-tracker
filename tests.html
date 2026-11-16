@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>엔진 검사</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+    li.ok::marker { content: '✓ '; color: #1a7f37; } li.bad { color: #c00; } li.bad::marker { content: '✗ '; }
+    small { color: #666; }
+  </style>
+  <script>window.BT_TEST = true;</script>
+</head>
+<body>
+  <h1>훈련·식단 엔진 검사</h1>
+  <p id="sum"></p>
+  <ul id="out"></ul>
+  <main id="main" hidden></main><div id="focus" hidden></div><div id="sheet" hidden></div><div id="toast"></div>
+  <script src="plan.js"></script>
+  <script src="foods.js"></script>
+  <script src="app.js"></script>
+  <script src="engine.js"></script>
+  <script src="pro.js"></script>
+  <script src="food.js"></script>
+  <script>
+  // 규칙을 고친 뒤 이 페이지를 열어 모두 ✓인지 확인하세요. 실제 기록은 읽거나 쓰지 않습니다.
+  const res = [];
+  const check = (name, ok, got) => res.push({ name, ok: !!ok, got });
+  // 상황마다 빈 상태에서 시작
+  function scene(days, settings = {}) {
+    state = normalize({ v: 1, settings: Object.assign({ level: 4, track: 'up', startDate: '2026-11-02', sex: 'm', age: 30, heightCm: 172 }, settings), days: JSON.parse(JSON.stringify(days)), weeks: {}, meta: {}, timer: {} });
+  }
+  const NON_FINGER = ['homeA', 'homeB', 'rest'];
+
+  scene({ '2026-11-14': { session: 'rest' }, '2026-11-15': { session: 'volume', dur: 180, rpe: 8.5 } });
+  let r = recommend('2026-11-16');
+  check('3시간 RPE 8.5 볼륨 다음 날 → 손가락 안 쓰는 운동/휴식', NON_FINGER.includes(r.id), r.id + ' · ' + r.why);
+  r = recommend('2026-11-17');
+  check('그다음 날(48시간) → 고강도 가능', r.id === 'limit', r.id + ' · ' + r.why);
+
+  scene({ '2026-11-16': { finger: true } });
+  r = recommend('2026-11-16');
+  check('손가락 통증 → homeB 또는 휴식', ['homeB', 'rest'].includes(r.id), r.id);
+
+  scene({ '2026-11-16': { session: 'homeA' }, '2026-11-17': { session: 'homeB' }, '2026-11-18': { session: 'volume', dur: 90, rpe: 5 } });
+  r = recommend('2026-11-19');
+  check('3일 연속 운동 → 휴식', r.id === 'rest', r.id + ' · ' + r.why);
+
+  scene({ '2026-11-16': { sleep: 4.5, finger: true, weak: true } });
+  let rd = readiness('2026-11-16');
+  check('수면 4.5h + 통증 + 힘 떨어짐 → 컨디션 40 미만', rd.score < 40, rd.score + ' ' + rd.why.join(', '));
+  scene({ '2026-11-16': { sleep: 8 } });
+  rd = readiness('2026-11-16');
+  check('푹 잔 휴식 다음 날 → 컨디션 80 이상', rd.score >= 80, rd.score);
+
+  scene({ '2026-11-15': { session: 'volume', dur: 90, rpe: 5 } }, { track: 'new' });
+  r = recommend('2026-11-16');
+  check('입문: 가벼운 암장 다음 날도 암장 안 함', !usesFingers(r.id), r.id + ' · ' + r.why);
+  scene({ '2026-11-15': { session: 'volume', dur: 90, rpe: 5 } }, { track: 'up' });
+  r = recommend('2026-11-16');
+  check('레벨업: 가벼운 암장 다음 날은 손가락 운동 가능', usesFingers(r.id) || r.id === 'homeA' || r.id === 'homeB', r.id);
+
+  scene({}, { track: 'ret', startDate: '2026-11-16' });
+  r = recommend('2026-11-16');
+  check('복귀 1주차: 한계 대신 볼륨', r.id !== 'limit', r.id + ' · ' + r.why);
+  check('복귀 초기: 행보드 한 단계 낮춤', /복귀 초기/.test(hangFor('2026-11-23').text || ''), hangFor('2026-11-23').text);
+
+  scene({});
+  let b = benchOf({ bw: 70, hang: 14, pull: 28 });
+  check('체중 70 · 행보드 +14kg = 120% → V4~5', b.vh >= 4 && b.vh < 5.5, b.hangPct.toFixed(0) + '% → V' + b.vh.toFixed(1));
+  check('풀업 +28kg = 140% → V6 근처', b.vp >= 5.5 && b.vp < 7, b.pullPct.toFixed(0) + '% → V' + b.vp.toFixed(1));
+  b = benchOf({ bw: 70, reps: 12 });
+  check('맨몸 풀업 12회 → 1회 최대 약 140%', Math.abs(b.pullPct - 140) < 1, b.pullPct.toFixed(1));
+  check('힘 V6 · 완등 V3 → 기술이 제한 요인', diagnose({ v: 6 }, 3).k === 'tech');
+  check('힘 V2 · 완등 V5 → 힘이 제한 요인', diagnose({ v: 2 }, 5).k === 'str');
+
+  scene({ '2026-11-10': { session: 'limit', rec: 'rest' }, '2026-11-11': { finger: true } });
+  const os = overrideStats('2026-11-16');
+  check('쉬라는 날 고강도 → 다음 날 통증 감지', os.risky === 1 && os.painAfter === 1, JSON.stringify(os));
+
+  const ing = parseIngredients('밥 1공기, 계란 2개, 스팸 50g');
+  check('재료 계산: 밥 310 + 계란 156 + 스팸 160 = 626kcal', ing.k === 626, ing.k);
+  check('이름 추정: 엄마표 김치볶음밥 → 김치볶음밥', (estimateFood('엄마표 김치볶음밥') || {}).n === '김치볶음밥');
+  check('모든 음식 0.5인분 단위', FOODS.every(f => f.s === 0.5));
+  check('음식 id 중복 없음', new Set(FOODS.map(f => f.id)).size === FOODS.length, FOODS.length + '개');
+
+  scene({ '2026-11-16': { weight: 70 } }, { inbodyBmr: 1650, bodyFat: 15 });
+  check('인바디 기초대사량이 있으면 그 값 사용', autoTargets('2026-11-16').bmrVal === 1650, autoTargets('2026-11-16').src);
+  scene({ '2026-11-16': { weight: 70 } }, { bodyFat: 15 });
+  check('체지방률만 있으면 제지방량 계산 (370+21.6×59.5=1655)', autoTargets('2026-11-16').bmrVal === 1655, autoTargets('2026-11-16').bmrVal);
+  scene({ '2026-11-16': { weight: 70 } });
+  check('인바디 없으면 나이·키·체중 계산', autoTargets('2026-11-16').src === 'mifflin', autoTargets('2026-11-16').bmrVal);
+
+  const pp = parseProblems('무등산\n슬랩 왕, V3\n크림프\tV5-6\n불암산, 모서리, VB\n아레트 V4\n이름만', '');
+  check('붙여넣기: 지역 머리글·탭·VB·쉼표 없는 등급', pp.length === 4 && pp[0].area === '무등산' && pp[1].v === 5 && pp[2].area === '불암산' && pp[2].v === 0 && pp[3].name === '아레트' && pp[3].area === '무등산' && pp[3].v === 4, JSON.stringify(pp));
+
+  const bad = res.filter(x => !x.ok).length;
+  document.getElementById('sum').textContent = `${res.length - bad} / ${res.length} 통과`;
+  document.getElementById('out').innerHTML = res.map(x => `<li class="${x.ok ? 'ok' : 'bad'}">${x.name}${x.got != null ? ` <small>(${esc(x.got)})</small>` : ''}</li>`).join('');
+  window.TEST_RESULT = { pass: res.length - bad, total: res.length, fails: res.filter(x => !x.ok) };
+  </script>
+</body>
+</html>

@@ -32,6 +32,7 @@ function load() {
   return freshState();
 }
 function save() {
+  if (window.BT_TEST) return; // 검사 페이지는 실제 기록을 건드리지 않음
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
   catch (e) { toast('저장하지 못했습니다. 브라우저 저장소가 막혀 있습니다.'); }
 }
@@ -183,13 +184,16 @@ function autoTargets(date) {
   const s = state.settings, w = curWeight(date), g = goalOf(), m = PLAN.meals;
   if (!isNum(w)) return null;
   const f = m.goalFactor[g], full = (s.sex === 'm' || s.sex === 'f') && isNum(s.age) && isNum(s.heightCm);
+  // 기초대사량: 인바디 측정값 > 체지방률로 계산(Katch-McArdle, 제지방량 기준) > 성별·나이·키·체중(Mifflin-St Jeor)
+  let bmr = null, src = 'weight';
+  if (isNum(s.inbodyBmr)) { bmr = s.inbodyBmr; src = 'inbody'; }
+  else if (isNum(s.bodyFat)) { bmr = 370 + 21.6 * w * (1 - s.bodyFat / 100); src = 'fat'; }
+  else if (full) { bmr = 10 * w + 6.25 * s.heightCm - 5 * s.age + (s.sex === 'f' ? -161 : 5); src = 'mifflin'; }
   let rest, gym;
-  if (full) {
-    const bmr = 10 * w + 6.25 * s.heightCm - 5 * s.age + (s.sex === 'f' ? -161 : 5);
-    rest = bmr * m.activity.rest * f; gym = bmr * m.activity.gym * f;
-  } else { rest = w * 31 * f; gym = w * 37 * f; }
+  if (bmr) { rest = bmr * m.activity.rest * f; gym = bmr * m.activity.gym * f; }
+  else { rest = w * 31 * f; gym = w * 37 * f; }
   const r50 = v => Math.round(v / 50) * 50;
-  return { rest: r50(rest), gym: r50(gym), protein: Math.round((w * m.proteinPerKg[g]) / 5) * 5, bmr: full };
+  return { rest: r50(rest), gym: r50(gym), protein: Math.round((w * m.proteinPerKg[g]) / 5) * 5, bmr: !!bmr, src, bmrVal: bmr && Math.round(bmr) };
 }
 function targets(date) {
   const s = state.settings, a = autoTargets(date) || { gym: PLAN.meals.refKcal.gym, rest: PLAN.meals.refKcal.rest, protein: 100, bmr: false, none: true };
@@ -237,7 +241,8 @@ function hangFor(date) {
   const why = [];
   if (weekStats(addDays(mon, -7)).finger) why.push('지난주 손가락 통증');
   if (state.weeks[mon] && state.weeks[mon].hold) why.push('강도 유지 선택');
-  if (why.length) lvl--; // 두 사유가 겹쳐도 한 단계만 낮춤
+  if (TR().easyWeeks && w <= TR().easyWeeks) why.push('복귀 초기');
+  if (why.length) lvl--; // 사유가 겹쳐도 한 단계만 낮춤
   lvl = Math.max(0, lvl);
   const hl = tier().hangLevels;
   return { lvl, text: hl[lvl] + (why.length ? ` (한 단계 낮춤: ${why.join(', ')})` : ''), short: hl[lvl] };
@@ -316,51 +321,21 @@ function getSteps(sid, date) {
   return list;
 }
 
-// ---------- 오늘 세션 추천 ----------
-function recommend(date) {
-  const mon = mondayOf(date), dates = weekDates(mon), st = state.settings;
-  const other = d => (d === date ? null : sessOn(d));
-  const busy = !!(state.weeks[mon] && state.weeks[mon].busy);
-  const req = busy ? PLAN.busySlots : PLAN.slots.map(s => s.id);
-  const used = new Set(dates.map(other).map(slotOf).filter(Boolean));
-  const remaining = req.filter(s => !used.has(s));
-  const free = dates.filter(d => d >= date && !other(d));
-  const yHigh = isHigh(other(addDays(date, -1))), tHigh = isHigh(other(addDays(date, 1)));
-  const canHigh = !yHigh && !tHigh;
-  const highRem = remaining.filter(s => s === 'limit' || s === 'str');
-  const slack = free.length - remaining.length;
+// 오늘 세션 추천·회복 계산·체력 평가는 engine.js에 있습니다.
 
-  // 오늘을 빼고 남은 빈 날에 고강도를 하루씩 띄워 몇 개 넣을 수 있나
-  const placed = new Set();
-  let cap = 0;
-  free.filter(d => d !== date).forEach(d => {
-    const p = addDays(d, -1), n = addDays(d, 1);
-    if (!isHigh(other(p)) && !placed.has(p) && !isHigh(other(n))) { placed.add(d); cap++; }
-  });
-
-  const sleepBad = liveFlags(date).short >= st.shortSleepDays || verdict(addDays(mon, -7)).flags.sleep;
-  const ok = s => remaining.includes(slotOf(s)) && (!isHigh(s) || canHigh);
-  let id, why;
-  if (!remaining.length) {
-    id = 'rest'; why = busy ? '바쁜 주 필수 세션(한계·볼륨)을 다 채웠습니다' : '이번 주 세션을 다 채웠습니다';
-  } else if (highRem.length && canHigh && highRem.length > cap) {
-    id = highRem.includes('limit') ? 'limit' : 'strength';
-    why = `남은 ${free.length}일에 고강도 ${highRem.length}개를 하루씩 띄워 넣으려면 오늘 해야 합니다`;
-  } else {
-    const base = PLAN.baseByWeekday[dow(date)];
-    if (base === 'rest' && slack > 0) { id = 'rest'; why = '기본 배치상 쉬는 날'; }
-    else if (base !== 'rest' && ok(base)) { id = base; why = '기본 배치 순서'; }
-    else {
-      id = PLAN.order.find(ok);
-      why = yHigh ? '어제 고강도 → 오늘은 고강도 제외' : tHigh ? '내일 고강도 예정 → 오늘은 고강도 제외'
-        : base === 'rest' ? `남은 ${free.length}일에 세션 ${remaining.length}개 → 오늘 쉬면 다 못 채웁니다` : '남은 세션 중 순서상 다음';
-      if (!id) { id = 'rest'; why = '고강도 연속을 피하려면 오늘은 휴식'; }
-    }
-  }
-  if (id === 'limit' && sleepBad && remaining.includes('volume')) {
-    id = 'volume'; why = '수면 6시간 미만이 잦음 → 한계 대신 볼륨';
-  }
-  return { id, why, remaining, busy, canHigh, yHigh, tHigh, slack, free };
+// 운동 후 기록: 실제 시간과 힘든 정도(RPE). 다음 날 추천이 이 값으로 정해집니다.
+function loadCard(date) {
+  const x = day(date), s = S(x.session);
+  if (!s || x.session === 'rest') return '';
+  const rpeTxt = r => !isNum(r) ? '' : r <= 3 ? '가벼움' : r <= 5 ? '보통' : r <= 7 ? '힘듦' : r <= 9 ? '매우 힘듦' : '한계';
+  return `<section class="card">
+    <div class="card-h"><h2>운동량</h2><span class="muted">다음 날 추천에 반영</span></div>
+    <div class="metrics2">
+      ${bigStepper(date, 'dur', '운동 시간', '분', 15, String(s.min))}
+      ${bigStepper(date, 'rpe', `힘든 정도 ${rpeTxt(x.rpe)}`, '/10', 1, String(DEF_RPE[s.intensity]))}
+    </div>
+    <p class="hint">RPE 1 = 산책, 5 = 대화 가능한 정도, 8 = 빡셈, 10 = 더는 못 함. 비워 두면 ${s.min}분 · RPE ${DEF_RPE[s.intensity]}로 봅니다.</p>
+  </section>`;
 }
 
 // ---------- 주간 통계·판정 ----------
@@ -404,7 +379,7 @@ function verdict(mon) {
     const diff = s.avg - pAvg;
     const line = `${pLabel} ${f1(pAvg)} → 이번 주 ${f1(s.avg)}kg (${diff > 0 ? '+' : ''}${diff.toFixed(1)})`;
     if (goal === 'gain') {
-      if (diff < st.plateauKg) { flags.plateau = true; cards.push({ lv: 'warn', icon: 'scale', t: '체중이 늘지 않음', b: `${line}. 다음 주는 끼니마다 밥 1/3공기를 더합니다.` }); }
+      if (diff < st.plateauKg) { flags.plateau = true; cards.push({ lv: 'warn', icon: 'scale', t: '체중이 늘지 않음', b: `${line}. 다음 주는 끼니마다 밥 0.5공기를 더합니다.` }); }
       else if (diff > st.fastLossKg) cards.push({ lv: 'warn', icon: 'scale', t: '체중이 너무 빨리 늘어남', b: `${line}. 간식·야식을 줄이고 단백질 위주로 먹습니다.` });
       else cards.push({ lv: 'ok', icon: 'scale', t: '증량 순조', b: `${line}. 계획대로 진행합니다.` });
     } else if (goal === 'keep') {
@@ -414,7 +389,7 @@ function verdict(mon) {
       } else cards.push({ lv: 'ok', icon: 'scale', t: '체중 유지 중', b: `${line}. 계획대로 진행합니다.` });
     } else if (diff > -st.plateauKg) {
       flags.plateau = true;
-      cards.push({ lv: 'warn', icon: 'scale', t: '체중 정체', b: `${line}. 다음 주 쉬는 날은 끼니마다 밥 1/3공기를 더 줄입니다.` });
+      cards.push({ lv: 'warn', icon: 'scale', t: '체중 정체', b: `${line}. 다음 주 쉬는 날은 끼니마다 밥 0.5공기를 더 줄입니다.` });
     } else if (-diff > st.fastLossKg) {
       flags.fast = true;
       cards.push({ lv: 'warn', icon: 'scale', t: '감량이 너무 빠름', b: `${line}. 다음 주 암장 날 운동 전에 식빵 1장 또는 김밥 1줄을 추가합니다.` });
@@ -446,6 +421,9 @@ function verdict(mon) {
     flags.hold = true;
     cards.push({ lv: 'warn', icon: 'finger', t: '3주차 맨몸 7초 보류 권장', b: '2주차에 통증이나 힘 떨어짐이 있었습니다. 3주차도 2주차 강도를 유지하세요.', act: { k: 'hold', mon: addDays(mon, 7), on: !!(state.weeks[addDays(mon, 7)] || {}).hold } });
   }
+  const os = overrideStats(addDays(mon, 6));
+  if (os.painAfter) cards.push({ lv: 'warn', icon: 'alert', t: `회복 권고를 무시한 뒤 통증 ${os.painAfter}회`, b: `최근 4주 동안 쉬라는 날 손가락 운동을 한 날이 ${os.risky}일이고, 그중 ${os.painAfter}번은 1~2일 안에 통증을 기록했습니다. 회복 추천을 따라 주세요.` });
+  else if (os.risky >= 3) cards.push({ lv: 'info', icon: 'info', t: `회복 권고와 다르게 운동 ${os.risky}일`, b: '최근 4주 동안 쉬라는 날 손가락 운동을 했지만 통증은 없었습니다. 계속 괜찮다면 설정의 회복 기준(plan.js recovery)을 느슨하게 조정할 수 있습니다.' });
   if (!cards.some(c => c.lv === 'warn')) cards.push({ lv: 'ok', icon: 'check', t: '조정 없음', b: '모든 규칙이 정상입니다. 다음 주 진행표대로 갑니다.' });
   return { cards, flags, s, p, ended };
 }
@@ -610,14 +588,19 @@ function bigStepper(date, k, label, unit, step, ph) {
   </div>`;
 }
 function morningCard(date) {
-  const lw = lastWeightBefore(addDays(date, -1));
-  return `<section class="card">
+  const lw = lastWeightBefore(addDays(date, -1)), x = day(date), rd = readiness(date);
+  return `<section class="card ready r-${rd.lv}">
     <div class="card-h"><h2>컨디션 체크</h2><span class="muted">매일 아침</span></div>
+    <div class="rd-row">
+      ${ring(rd.score / 100, 74, 7, 'rd-ring', `<b>${rd.score}</b><small>점</small>`)}
+      <div class="rd-txt"><b>${rd.label} · ${rd.advice}</b><small>${rd.why.length ? esc(rd.why.join(' · ')) : rd.logged ? '감점 요인 없음' : '수면을 적으면 더 정확해집니다'}</small></div>
+    </div>
     <div class="metrics2">
       ${bigStepper(date, 'weight', '체중', 'kg', 0.1, lw != null ? String(lw) : '—')}
       ${bigStepper(date, 'sleep', '수면', '시간', 0.5, '—')}
     </div>
-    <div class="chips">${toggleChip(date, 'finger', '손가락 통증', 'finger')}${toggleChip(date, 'elbow', '팔꿈치 통증', 'alert')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}</div>
+    <div class="chips">${toggleChip(date, 'finger', '손가락 통증', 'finger')}${toggleChip(date, 'elbow', '팔꿈치 통증', 'alert')}${toggleChip(date, 'sore', '근육통', 'leaf')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}</div>
+    ${x.finger || x.elbow ? `<p class="warn">${ic('alert')}통증이 3일 넘게 가거나, 붓기·딸깍 소리·힘이 갑자기 빠지는 느낌이 있으면 운동을 멈추고 정형외과(스포츠의학) 진료를 받으세요. 이 앱의 추천은 의학적 진단이 아닙니다.</p>` : ''}
   </section>`;
 }
 
@@ -661,15 +644,16 @@ function pickerHero(date) {
       <div class="hero-top"><span class="kicker"><i class="kdot"></i>오늘의 추천</span>${x.session ? `<button class="hero-x" data-act="cancel-pick">닫기</button>` : ''}</div>
       <h2 class="hero-name">${rs.name}</h2>
       <p class="hero-why">${ic('spark')}${r.why}</p>
+      <p class="hero-rec">${esc(r.status)}</p>
       ${heroStats(rs)}
       <button class="btn-xl" data-act="pick" data-date="${date}" data-sid="${r.id}"><span>이 세션으로 할게요</span>${ic('chevR')}</button>
     </section>
     <section class="card">
       <div class="card-h"><h2>직접 고르기</h2><span class="muted">남은 세션 ${r.remaining.length}개</span></div>
       <div class="opt-grid">${opts.map(id => {
-        const s = S(id), used = s.slot && usedSlots.has(s.slot), warn = isHigh(id) && !r.canHigh;
+        const s = S(id), used = s.slot && usedSlots.has(s.slot), warn = (isHigh(id) && !r.canHigh) || (usesFingers(id) && !r.fingerOk);
         return `<button class="opt i-${s.intensity} ${x.session === id ? 'cur' : ''} ${used ? 'used' : ''}" data-act="pick" data-date="${date}" data-sid="${id}">
-          <span class="opt-ic">${ic(s.icon)}</span><b>${s.short}</b><span class="opt-desc">${s.desc}</span><small class="${used ? '' : warn ? 'opt-warn' : ''}">${used ? '이번 주 완료' : warn ? '고강도 연속 주의' : s.place + (s.min ? ' · ' + s.min + '분' : '')}</small></button>`;
+          <span class="opt-ic">${ic(s.icon)}</span><b>${s.short}</b><span class="opt-desc">${s.desc}</span><small class="${used ? '' : warn ? 'opt-warn' : ''}">${used ? '이번 주 완료' : warn ? '회복 부족 · 주의' : s.place + (s.min ? ' · ' + s.min + '분' : '')}</small></button>`;
       }).join('')}</div>
       <p class="hint">남은 세션: ${remainLabel}</p>
       <button class="chipbtn ${r.busy ? 'on' : ''}" data-act="busy" data-mon="${mon}" aria-pressed="${r.busy}">${ic('stack')}바쁜 주 · 암장 한계+볼륨만</button>
@@ -788,7 +772,7 @@ function viewToday() {
   const d = ui.date, t = todayStr();
   return appbar(eyebrowFor(d), longDate(d), 'nav') +
     (d !== t ? `<button class="back-today" data-act="goto" data-target="today" data-date="${t}">오늘로 돌아가기</button>` : '') +
-    weekStrip(d, 'today') + (lvlSet() ? '' : levelCard()) + (profileSet() ? '' : profileNag()) + goalCard(d) + backupNag() + sessionBlock(d) + morningCard(d) + dietCard(d) + prepCard(d);
+    weekStrip(d, 'today') + onboardCard() + morningCard(d) + goalCard(d) + backupNag() + sessionBlock(d) + (ui.picking ? '' : loadCard(d)) + dietCard(d) + prepCard(d);
 }
 
 // ---------- 포커스 모드 ----------
@@ -840,15 +824,18 @@ function renderFocus() {
 
 // ---------- 탭: 기록 ----------
 function viewRecord() {
+  if (ui.recView === 'out') return appbar('<span class="eb-tag">OUTDOOR</span> 자연 바위', '자연 볼더링 기록', null) + recSeg() + outdoorView();
+  if (ui.recView === 'bench') return appbar('<span class="eb-tag">TEST</span> 체중 대비 근력', '체력 측정', null) + recSeg() + benchView();
   const d = ui.recDate, x = day(d);
   const opts = ['', 'limit', 'strength', 'volume', 'homeA', 'homeB', 'homeC', 'rest'].map(id => `<option value="${id}" ${(x.session || '') === id ? 'selected' : ''}>${id ? S(id).name : '선택 안 함'}</option>`).join('');
   const hist = Object.keys(state.days).filter(k => { const y = state.days[k]; return y.session || isNum(y.weight) || y.note; }).sort().reverse().slice(0, 30);
   const allMetrics = ['limit', 'volume', 'strength', 'homeC'].includes(x.session) ? metricFields(d, x.session) : metricFields(d, 'limit') + metricFields(d, 'strength');
-  return appbar(eyebrowFor(d), longDate(d), 'recnav') + weekStrip(d, 'record') +
+  return appbar(eyebrowFor(d), longDate(d), 'recnav') + recSeg() + weekStrip(d, 'record') +
     `<section class="card"><div class="card-h"><h2>세션</h2></div>
       <label class="field"><span>한 세션</span><select data-field="session" data-date="${d}">${opts}</select></label>
     </section>` +
     morningCard(d) +
+    loadCard(d) +
     `<section class="card"><div class="card-h"><h2>세션 기록</h2></div>${allMetrics}
       <label class="field"><span>메모</span><textarea rows="2" placeholder="컨디션, 문제 특징 등" data-field="note" data-date="${d}">${esc(x.note)}</textarea></label>
     </section>` +
@@ -894,10 +881,17 @@ function viewWeek() {
 }
 
 // ---------- Claude 분석 내보내기 ----------
-function analysisCard(mon) {
+function analysisCard(view) {
+  // 보고 있는 주가 아직 진행 중이면 기본은 다 끝난 지난주. 버튼으로 바꿀 수 있음
+  const prev = addDays(view, -7), ended = addDays(view, 6) < todayStr();
+  const mon = ended ? view : (ui.repMon === view ? view : prev);
+  const lab = m => `${weekNo(m) < 1 ? '준비' : weekNo(m) + '주차'} · ${md(m)}–${md(addDays(m, 6))}`;
   return `<section class="card ai">
     <div class="card-h"><h2>${ic('spark')}Claude 주간 분석</h2></div>
-    <p class="hint">이번 주 기록, 자동 판정, 지난 4주 추이를 분석 요청문과 함께 묶습니다. 복사해서 Claude 대화창에 붙여넣거나 파일로 공유하세요.</p>
+    ${ended ? '' : `<div class="cats rep-pick">
+      <button class="${mon === prev ? 'on' : ''}" data-act="rep-week" data-mon="${prev}">지난주 ${lab(prev)}</button>
+      <button class="${mon === view ? 'on' : ''}" data-act="rep-week" data-mon="${view}">이번 주 (진행 중)</button></div>`}
+    <p class="hint"><b>${lab(mon)}</b> 기록, 자동 판정, 지난 4주 추이를 분석 요청문과 함께 묶습니다. 복사해서 Claude 대화창에 붙여넣거나 파일로 공유하세요.</p>
     <div class="btn-row">
       <button class="btn" data-act="report-copy" data-mon="${mon}">${ic('copy')}복사</button>
       <button class="btn" data-act="report-share" data-mon="${mon}">${ic('share')}공유</button>
@@ -926,8 +920,10 @@ function buildReport(mon) {
   }
   L.push(`- 레벨: V${lvl()}${gradeSys() === 'v' ? '' : ` (${PLAN.gradeSystems[gradeSys()].name} ${levelName()})`} · ${tier().range} ${tier().name} · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
   L.push(`- 등급 처방(V${lvl()} ${tier().title || ''}): 한계 세션 ${fill(tier().limit.d)} / 손가락 ${tier().grip} ${tier().hangSets}회 / 지구력 ${fill(tier().end.d)}${tier().campus ? ' / 캠퍼스 ' + tier().campus.t : ''}`);
-  L.push('- 주간 묶음: 한계(고강도) · 근력(고강도, 집 C 대체 가능) · 볼륨 · 집 A · 집 B · 휴식 2. 요일 자유, 고강도 연속 금지');
+  L.push('- 주간 묶음: 한계(고강도) · 근력(고강도, 집 C 대체 가능) · 볼륨 · 집 A · 집 B · 휴식 2. 요일 자유. 추천은 회복 기반(손가락 많이 쓴 다음 날은 손가락 휴식, 고강도는 48시간 간격, 3일 연속이면 휴식, 7일 부하가 평소 1.5배 넘으면 감량)');
   L.push(`- 이번 주 진행표: ${cfg.goal} / 행보드 ${hangFor(mon).skip ? '생략' : hangFor(mon).text} / 풀업 ${pullFor(mon)}${cfg.recovery ? ' / 회복 주간' : ''}`);
+  L.push(`- 클라이머 유형: ${TR().name} (${TR().d})`);
+  reportExtra(mon).forEach(l => L.push(l));
   L.push('');
   L.push('## 일별 기록');
   L.push('| 날짜 | 세션 | 단계 | 체중 | 수면 | 몸 상태 | 클라이밍 기록 | 식단 체크 |');
@@ -1004,12 +1000,19 @@ function viewSettings() {
   const tg = targets(todayStr()), a = tg.auto;
   const lb = state.meta.lastBackup;
   return appbar('<span class="eb-tag">SETTINGS</span> 데이터는 이 기기에만 저장', '설정', null) +
-    levelCard() + themeCard() +
+    trackCard() + levelCard() + themeCard() +
     `<section class="card" id="profile"><div class="card-h"><h2>내 정보</h2><span class="muted">${profileSet() ? '입력됨' : '칼로리 계산에 사용'}</span></div>
       <h3 class="h3">성별</h3>${seg('sex', [['m', '남성'], ['f', '여성']])}
       <div class="fields2">
         ${num('age', '나이', 1, '예: 30')}${num('heightCm', '키 (cm)', 0.5, '예: 172')}
       </div>
+      <h3 class="h3">인바디 (있으면 더 정확)</h3>
+      <div class="fields2">
+        ${num('bodyFat', '체지방률 (%)', 0.1, '예: 18.5')}${num('smm', '골격근량 (kg)', 0.1, '예: 32.4')}
+        ${num('inbodyBmr', '기초대사량 (kcal)', 1, '인바디 결과지 값')}
+        <label class="field"><span>측정일</span><input type="date" data-field="set:inbodyDate" value="${st.inbodyDate || ''}"></label>
+      </div>
+      <p class="hint">인바디 기초대사량이 있으면 그 값을, 체지방률만 있으면 제지방량으로 계산하고, 둘 다 없으면 나이·키·체중으로 계산합니다. 인바디는 같은 조건(아침 공복, 운동 전)에서 4~8주마다 재면 추세를 보기 좋습니다.</p>
     </section>
     <section class="card"><div class="card-h"><h2>체중 목표</h2><span class="muted">${GOALS[goalOf()]}</span></div>
       ${seg('goal', [['cut', '감량'], ['keep', '유지'], ['gain', '증량']])}
@@ -1026,7 +1029,7 @@ function viewSettings() {
         ${num('kcalGym', '암장 날 칼로리', 50, `자동 ${a.gym}`)}${num('kcalRest', '쉬는 날 칼로리', 50, `자동 ${a.rest}`)}
         ${num('protein', '단백질 (g/일)', 5, `자동 ${a.protein}`)}
       </div>
-      <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? '기초대사량(성별·나이·키·최근 7일 체중) × 활동량' + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>
+      <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? `기초대사량 ${a.bmrVal}kcal(${{ inbody: '인바디 측정값', fat: '인바디 체지방률 · 제지방량 기준', mifflin: '성별·나이·키·최근 7일 체중' }[a.src]}) × 활동량` + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>
     </section>
     <section class="card"><div class="card-h"><h2>백업</h2><span class="muted">마지막 ${lb ? md(lb) : '없음'}</span></div>
       <p class="hint">브라우저 데이터를 지우면 기록이 사라집니다. 주 1회 내보내기를 권합니다.</p>
@@ -1035,6 +1038,7 @@ function viewSettings() {
         <button class="btn" data-act="import">불러오기</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
       </div>
+      ${protectBox()}
       <button class="btn danger" data-act="reset">모든 기록 지우기</button>
     </section>
     ${analysisCard(mondayOf(todayStr()))}
@@ -1044,7 +1048,7 @@ function viewSettings() {
       </tbody></table></div>
     </section>
     <section class="card"><div class="card-h"><h2>자동 조정 규칙</h2></div><ul class="plain rules">
-      ${goalOf() === 'gain' ? `<li>주 평균 체중이 ${st.plateauKg}kg 미만으로 늘면 → 다음 주 끼니마다 밥 1/3공기 추가</li>` : goalOf() === 'cut' ? `<li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 1/3공기 감소</li>` : `<li>주 평균 체중이 ${st.fastLossKg}kg 넘게 변하면 알림</li>`}
+      ${goalOf() === 'gain' ? `<li>주 평균 체중이 ${st.plateauKg}kg 미만으로 늘면 → 다음 주 끼니마다 밥 0.5공기 추가</li>` : goalOf() === 'cut' ? `<li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 0.5공기 감소</li>` : `<li>주 평균 체중이 ${st.fastLossKg}kg 넘게 변하면 알림</li>`}
       <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 운동 전 식빵 1장/김밥 1줄</li>
       <li>손가락 통증 → 그 주 행보드 제외, 다음 주 한 단계 후퇴</li>
       <li>팔꿈치 통증 → 7일간 풀업·록오프 제외</li>
@@ -1053,7 +1057,7 @@ function viewSettings() {
       <li>근력 세션을 집 C로 대체 → 다음 암장 날 행보드 보충 3세트</li>
       <li>레벨(V0~V10)을 바꾸면 문제 등급·행보드·풀업·록오프·집 운동 변형이 바로 바뀝니다</li>
     </ul></section>
-    <p class="foot">볼더링 트래커 · 계획 수정은 plan.js</p>`;
+    <p class="foot">볼더링 트래커 · 계획 수정은 plan.js<br>이 앱의 운동·식단 추천과 체력 평가는 일반적인 훈련 정보이며 의학적 진단이나 치료를 대신하지 않습니다. 통증·부상은 전문의와 상담하세요.</p>`;
 }
 
 // ---------- 테마 ----------
@@ -1103,6 +1107,7 @@ document.addEventListener('click', e => {
       else { ui.date = d; ui.tab = 'today'; ui.picking = false; }
       return render();
     case 'pick': {
+      if (d <= todayStr() && !day(d).rec) dayW(d).rec = recommend(d).id; // 추천과 실제를 비교해 피드백에 사용
       const x = dayW(d);
       if (x.session !== b.dataset.sid) x.checks = {};
       x.session = b.dataset.sid;
@@ -1151,8 +1156,9 @@ document.addEventListener('click', e => {
     case 'adj': {
       const x = dayW(d), k = b.dataset.k, step = +b.dataset.step;
       // 비어 있을 때 처음 누르면 기준값(전날 체중 / 수면 7시간)을 그대로 채움
-      if (!isNum(x[k])) x[k] = k === 'weight' ? (lastWeightBefore(addDays(d, -1)) ?? state.settings.startWeight ?? 60) : 7;
+      if (!isNum(x[k])) x[k] = k === 'weight' ? (lastWeightBefore(addDays(d, -1)) ?? state.settings.startWeight ?? 60) : k === 'dur' ? ((S(x.session) || {}).min || 120) : k === 'rpe' ? DEF_RPE[(S(x.session) || {}).intensity] || 6 : 7;
       else x[k] = Math.max(0, Math.round((x[k] + step) * 10) / 10);
+      if (k === 'rpe') x[k] = Math.min(10, Math.max(1, x[k]));
       return commit();
     }
     case 'brown': { const x = dayW(d); x.brown = Math.max(0, (isNum(x.brown) ? x.brown : 0) + +b.dataset.delta); return commit(); }
@@ -1161,6 +1167,7 @@ document.addEventListener('click', e => {
       state.weeks[m] = state.weeks[m] || {}; state.weeks[m][a] = !state.weeks[m][a];
       return commit();
     }
+    case 'rep-week': ui.repMon = b.dataset.mon; return render();
     case 'report-copy': return reportAction('copy', b.dataset.mon);
     case 'report-share': return reportAction('share', b.dataset.mon);
     case 'report-file': return reportAction('file', b.dataset.mon);
@@ -1192,7 +1199,7 @@ document.addEventListener('change', e => {
   if (!f) return;
   if (f.startsWith('set:')) {
     const k = f.slice(4), v = el.type === 'number' ? parseFloat(el.value) : el.value;
-    const optional = ['age', 'heightCm', 'startWeight', 'targetWeight', 'kcalGym', 'kcalRest', 'protein'];
+    const optional = ['age', 'heightCm', 'startWeight', 'targetWeight', 'kcalGym', 'kcalRest', 'protein', 'bodyFat', 'smm', 'inbodyBmr', 'inbodyDate'];
     if (el.value === '' && optional.includes(k)) { state.settings[k] = null; return commit(); }
     if ((el.type === 'number' && !isNum(v)) || v === '') { toast('값을 확인해 주세요'); return render(); }
     state.settings[k] = v;
@@ -1256,7 +1263,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 모든 스크립트를 읽은 뒤 시작 (timer.js가 VIEWS.timer를 등록)
-window.addEventListener('DOMContentLoaded', () => {
+if (!window.BT_TEST) window.addEventListener('DOMContentLoaded', () => {
   applyTheme();
   render();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
