@@ -347,7 +347,13 @@ function weekStats(mon) {
   weekDates(mon).forEach(d => { if (isHigh(sessOn(d)) && isHigh(sessOn(addDays(d, -1)))) consec++; });
   const brownVals = ds.map(([, x]) => x.brown).filter(isNum);
   const sleeps = ds.map(([, x]) => x.sleep).filter(isNum);
+  // 식단: 적은 날 / 아침·점심·저녁을 다 적은 날. 다 적은 날이 2일 이상이면 그날들로만 평균 (빠뜨린 끼니로 낮게 나오는 걸 막음)
+  const fed = ds.map(([d, x]) => ({ d, gym: isGymDay(d), full: ['b', 'l', 'd'].every(k => ((x.food || {})[k] || []).length), ...foodTotals(d) })).filter(f => f.n);
+  const full = fed.filter(f => f.full), base = full.length >= 2 ? full : fed;
+  const gymBase = base.filter(f => f.gym), restBase = base.filter(f => !f.gym);
+  const diet = { logged: fed.length, full: full.length, partial: base !== full, p: avg(base.map(f => f.p)), kGym: avg(gymBase.map(f => f.k)), kRest: avg(restBase.map(f => f.k)), nGym: gymBase.length, nRest: restBase.length };
   return {
+    diet,
     mon, ds, weights, avg: avg(weights), sleepAvg: avg(sleeps),
     gymDone: ds.filter(([, x]) => S(x.session) && S(x.session).gym && didIt(x)).length,
     done: ds.filter(([, x]) => didIt(x) && x.session !== 'rest').length,
@@ -373,7 +379,14 @@ function verdict(mon) {
   if (pAvg == null && w === 1 && isNum(st.startWeight)) { pAvg = st.startWeight; pLabel = '시작 체중'; }
   const goal = goalOf();
 
-  if (s.weights.length < 3 || pAvg == null) {
+  if (s.weights.length >= 3 && pAvg == null) {
+    // 지난주 기록이 없어도 이번 주 안의 흐름은 보여 줌
+    const wd = s.ds.filter(([, x]) => isNum(x.weight)), a = wd[0], b = wd[wd.length - 1], diff = b[1].weight - a[1].weight;
+    const pace = weightGoal() ? Math.abs((st.startWeight - st.targetWeight) / Math.max(1, diffDays(st.targetDate, st.startDate) / 7)) : null;
+    const dd = diffDays(b[0], a[0]) || 1, wkRate = diff / dd * 7;
+    const off = goal === 'cut' && isNum(pace) ? (-wkRate < pace * 0.5 ? ' 목표 속도보다 느립니다.' : -wkRate > pace * 1.8 ? ' 목표 속도보다 빠릅니다.' : ' 목표 속도에 가깝습니다.') : '';
+    cards.push({ lv: 'info', icon: 'scale', t: '이번 주 체중 흐름', b: `${md(a[0])} ${a[1].weight} → ${md(b[0])} ${b[1].weight}kg (${diff > 0 ? '+' : ''}${diff.toFixed(1)}, 주 ${wkRate > 0 ? '+' : ''}${wkRate.toFixed(1)}kg 속도).${off} 하루 체중은 염분·탄수화물로 1kg 가까이 흔들리니 참고만 하세요. 주 평균 비교는 다음 주부터 합니다.` });
+  } else if (s.weights.length < 3 || pAvg == null) {
     cards.push({ lv: 'info', icon: 'scale', t: '체중 판정 보류', b: `기록이 부족합니다 (이번 주 ${s.weights.length}일${pAvg == null ? ', 지난주 2일 미만' : ''}). 아침 체중을 3일 이상 적으면 판정합니다.` });
   } else {
     const diff = s.avg - pAvg;
@@ -420,6 +433,22 @@ function verdict(mon) {
   if (w === 2 && (s.weak || s.finger)) {
     flags.hold = true;
     cards.push({ lv: 'warn', icon: 'finger', t: '3주차 맨몸 7초 보류 권장', b: '2주차에 통증이나 힘 떨어짐이 있었습니다. 3주차도 2주차 강도를 유지하세요.', act: { k: 'hold', mon: addDays(mon, 7), on: !!(state.weeks[addDays(mon, 7)] || {}).hold } });
+  }
+  { // 식단: 단백질·암장 날 칼로리
+    const dt = s.diet, tg = targets(addDays(mon, 6));
+    const note = dt.partial ? ` 아침·점심·저녁을 다 적은 날이 ${dt.full}일뿐이라 실제보다 낮게 나왔을 수 있습니다. 세 끼를 다 적으면 더 정확해집니다.` : ` (세 끼를 다 적은 ${dt.full}일 기준)`;
+    if (dt.logged < 3 && dt.full < 2) {
+      if (ended || dt.logged) cards.push({ lv: 'info', icon: 'info', t: '식단 판정 보류', b: `식단을 적은 날이 ${dt.logged}일입니다. 3일 이상(또는 세 끼를 다 적은 날 2일 이상) 적으면 단백질·칼로리를 판정합니다.` });
+    } else {
+      const pp = dt.p / tg.protein;
+      if (pp < 0.8) {
+        if (!dt.partial) flags.protein = Math.round(dt.p); // 끼니가 빠진 기록이면 다음 주 식단까지 바꾸진 않음
+        cards.push({ lv: dt.partial ? 'info' : 'warn', icon: 'alert', t: `단백질 ${dt.partial ? '낮게 기록됨' : '부족'} · 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g`, b: `목표의 ${Math.round(pp * 100)}%입니다. 감량 중 단백질이 모자라면 근육과 손가락 힘이 같이 빠집니다. 다음 주는 끼니마다 단백질 반찬(계란·두부·닭가슴살·생선)을 하나씩 더하고, 운동 직후 단백질 음료를 챙기세요.${note}` });
+      }
+      const kp = dt.nGym ? dt.kGym / tg.gym : null;
+      if (isNum(kp) && kp < 0.85) cards.push({ lv: dt.partial ? 'info' : 'warn', icon: 'bolt', t: `암장 날 칼로리 ${dt.partial ? '낮게 기록됨' : '부족'} · 평균 ${Math.round(dt.kGym).toLocaleString()} / ${tg.gym.toLocaleString()}kcal`, b: `목표의 ${Math.round(kp * 100)}%입니다. 운동하는 날 너무 적게 먹으면 회복이 늦고 다음 세션 힘이 떨어집니다. 운동 전후 간식(바나나·단백질 음료)부터 챙기세요.${note}` });
+      if (pp >= 0.8 && !(isNum(kp) && kp < 0.85)) cards.push({ lv: 'ok', icon: 'check', t: '식단 순조', b: `단백질 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g${isNum(kp) ? ` · 암장 날 ${Math.round(dt.kGym).toLocaleString()}kcal` : ''}.${note}` });
+    }
   }
   const os = overrideStats(addDays(mon, 6));
   if (os.painAfter) cards.push({ lv: 'warn', icon: 'alert', t: `회복 권고를 무시한 뒤 통증 ${os.painAfter}회`, b: `최근 4주 동안 쉬라는 날 손가락 운동을 한 날이 ${os.risky}일이고, 그중 ${os.painAfter}번은 1~2일 안에 통증을 기록했습니다. 회복 추천을 따라 주세요.` });
@@ -915,7 +944,7 @@ function buildReport(mon) {
   {
     const tg = targets(mon), wk = Math.max(1, diffDays(st.targetDate, st.startDate) / 7);
     const who = [st.sex === 'm' ? '남' : st.sex === 'f' ? '여' : '', isNum(st.age) ? st.age + '세' : '', isNum(st.heightCm) ? st.heightCm + 'cm' : ''].filter(Boolean).join(' ');
-    L.push(`- 나: ${who || '정보 없음'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}`);
+    L.push(`- 나: ${who || '정보 없음 (성별·나이·키 미입력 → 칼로리는 체중만으로 대략 계산)'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}`);
     L.push(`- 식단 목표: 단백질 ${tg.protein}g/일, 암장 날 ${tg.gym}kcal · 쉬는 날 ${tg.rest}kcal${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? ' (직접 지정)' : ' (자동 계산)'}`);
   }
   L.push(`- 레벨: V${lvl()}${gradeSys() === 'v' ? '' : ` (${PLAN.gradeSystems[gradeSys()].name} ${levelName()})`} · ${tier().range} ${tier().name} · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
@@ -926,8 +955,8 @@ function buildReport(mon) {
   reportExtra(mon).forEach(l => L.push(l));
   L.push('');
   L.push('## 일별 기록');
-  L.push('| 날짜 | 세션 | 단계 | 체중 | 수면 | 몸 상태 | 클라이밍 기록 | 식단 체크 |');
-  L.push('|---|---|---|---|---|---|---|---|');
+  L.push('| 날짜 | 세션 | 단계 | 운동량 | 체중 | 수면 | 몸 상태 | 클라이밍 기록 | 식단 체크 |');
+  L.push('|---|---|---|---|---|---|---|---|---|');
   weekDates(mon).forEach(d => {
     const x = day(d), ss = S(x.session);
     let stp = '-';
@@ -935,9 +964,10 @@ function buildReport(mon) {
     const body = [x.finger ? '손가락 통증' : '', x.elbow ? '팔꿈치 통증' : '', x.weak ? '힘 떨어짐' : ''].filter(Boolean).join(', ') || '-';
     const climb = [isNum(x.brown) ? `볼륨 완등 ${x.brown}` : '', x.white ? `한계 문제 도달: ${x.white}` : '', x.hang ? `행보드 ${x.hang}` : '', x.pull ? `풀업 ${x.pull}` : '', ...(x.hangLog || []).map(l => `타이머 ${l.title} ${l.setsDone}/${l.sets}세트 ${l.work}초 ${l.board ? l.board + ' ' : ''}${l.grip || ''}${l.load ? ' ' + l.load : ''}`)].filter(Boolean).join(' · ') || '-';
     let meal = '-';
-    { const t = foodTotals(d); if (t.n) meal = `${t.n}개 음식 · ${Math.round(t.k)}kcal · 단백질 ${Math.round(t.p)}g${t.names ? ' (' + t.names + ')' : ''}`; }
-    L.push(`| ${md(d)} ${DOW[dow(d)]} | ${ss ? ss.short : '-'}${ss && ss.gym && x.time === 'day' ? '(낮)' : ''} | ${stp} | ${isNum(x.weight) ? x.weight : '-'} | ${isNum(x.sleep) ? x.sleep : '-'} | ${body} | ${climb.replace(/\|/g, '/')} | ${meal} |`);
-    if (x.note) L.push(`|  | 메모: ${String(x.note).replace(/\|/g, '/').replace(/\n/g, ' ')} |  |  |  |  |  |  |`);
+    { const t = foodTotals(d), miss = ['b', 'l', 'd'].filter(k => !((x.food || {})[k] || []).length).map(k => ({ b: '아침', l: '점심', d: '저녁' })[k]); if (t.n) meal = `${t.n}개 음식 · ${Math.round(t.k)}kcal · 단백질 ${Math.round(t.p)}g${t.names ? ' (' + t.names + ')' : ''}${miss.length ? ' · 미기록: ' + miss.join('·') : ''}`; }
+    const ld = loadOf(d), work = ld ? `${ld.min}분 · RPE ${ld.rpe}${ld.logged ? '' : ' (기본값)'}` : '-';
+    L.push(`| ${md(d)} ${DOW[dow(d)]} | ${ss ? ss.short : '-'}${ss && ss.gym && x.time === 'day' ? '(낮)' : ''} | ${stp} | ${work} | ${isNum(x.weight) ? x.weight : '-'} | ${isNum(x.sleep) ? x.sleep : '-'} | ${body} | ${climb.replace(/\|/g, '/')} | ${meal} |`);
+    if (x.note) L.push(`|  | 메모: ${String(x.note).replace(/\|/g, '/').replace(/\n/g, ' ')} |  |  |  |  |  |  |  |`);
   });
   L.push('');
   L.push('## 주간 요약');
@@ -945,6 +975,8 @@ function buildReport(mon) {
   L.push(`- 체중 주 평균 ${f1(s.avg)}kg (기록 ${s.weights.length}일), 지난주 ${f1(v.p.avg)}kg`);
   L.push(`- 수면 평균 ${isNum(s.sleepAvg) ? s.sleepAvg.toFixed(1) + '시간' : '-'}, 6시간 미만 ${s.short}일`);
   L.push(`- 볼륨 완등 최고 ${s.brownMax ?? '-'}개`);
+  { const ls = weekDates(mon).map(loadOf).filter(Boolean); L.push(`- 운동량(시간×RPE) 합계 ${ls.reduce((a, l) => a + l.au, 0).toLocaleString()} · 시간·RPE 직접 기록 ${ls.filter(l => l.logged).length}/${ls.length}일`); }
+  { const dt = s.diet, tg = targets(addDays(mon, 6)); L.push(`- 식단 기록 ${dt.logged}일 (세 끼 다 적은 날 ${dt.full}일) · 평균 단백질 ${isNum(dt.p) ? Math.round(dt.p) + 'g' : '-'} / ${tg.protein}g · 암장 날 평균 ${isNum(dt.kGym) ? Math.round(dt.kGym) + 'kcal' : '-'} / ${tg.gym} · 쉬는 날 평균 ${isNum(dt.kRest) ? Math.round(dt.kRest) + 'kcal' : '-'} / ${tg.rest}${dt.partial ? ' (일부 끼니 미기록 → 실제보다 낮을 수 있음)' : ''}`); }
   L.push('');
   L.push('## 앱 자동 판정');
   v.cards.forEach(c => L.push(`- [${c.lv === 'warn' ? '주의' : c.lv === 'ok' ? '정상' : '참고'}] ${c.t}: ${c.b}`));

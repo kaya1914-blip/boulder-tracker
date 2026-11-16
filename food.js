@@ -60,6 +60,7 @@ function slotsFor(date) {
 function dietNotes(date) {
   const gym = isGymDay(date), pf = verdict(addDays(mondayOf(date), -7)).flags, notes = [];
   if (gym && day(date).time === 'day') notes.push('낮 운동: 점심을 운동 2시간 전에 든든하게 먹고, 운동 전 계란은 뺍니다.');
+  if (pf.protein) notes.push(`지난주 단백질 평균 ${pf.protein}g으로 부족 → 끼니마다 단백질 반찬(계란·두부·닭가슴살·생선) 하나씩 더`);
   if (gym && pf.fast) notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 전 식빵 1장 추가');
   if (pf.plateau && goalOf() === 'gain') notes.push('지난주 체중이 늘지 않음 → 오늘은 끼니마다 밥 0.5공기 늘린 양으로 추천합니다');
   else if (!gym && pf.plateau && goalOf() === 'cut') notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 0.5공기 줄인 양으로 추천합니다');
