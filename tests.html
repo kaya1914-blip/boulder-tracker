@@ -94,19 +94,16 @@
   const pp = parseProblems('무등산\n슬랩 왕, V3\n크림프\tV5-6\n불암산, 모서리, VB\n아레트 V4\n이름만', '');
   check('붙여넣기: 지역 머리글·탭·VB·쉼표 없는 등급', pp.length === 4 && pp[0].area === '무등산' && pp[1].v === 5 && pp[2].area === '불암산' && pp[2].v === 0 && pp[3].name === '아레트' && pp[3].area === '무등산' && pp[3].v === 4, JSON.stringify(pp));
 
-  // 식단 판정: 점심만 적은 날 4일 → 단백질 부족 + "실제보다 낮을 수 있음"
+  // 식단 판정: 적은 그대로 평균
   const lunch = { l: [{ f: 'rice', q: 1 }, { f: 'egg', q: 1 }] };
   scene({ '2026-11-09': { weight: 65.5, session: 'limit', food: lunch }, '2026-11-11': { weight: 65.2, food: lunch }, '2026-11-13': { weight: 64.9, session: 'volume', food: lunch }, '2026-11-15': { food: lunch } }, { startWeight: 65.5, targetWeight: 63, goal: 'cut' });
   let vd = verdict('2026-11-09');
-  check('식단: 끼니가 빠진 기록 → 경고 대신 참고, 식단 자동 조정 안 함', !vd.flags.protein && vd.cards.some(c => c.lv === 'info' && /단백질 낮게 기록됨/.test(c.t) && /낮게 나왔을 수/.test(c.b)), vd.cards.map(c => c.t).join(' / '));
+  check('식단: 적은 기록 그대로 단백질 부족 경고 + 다음 주 식단 반영', vd.flags.protein && vd.cards.some(c => c.lv === 'warn' && /단백질 부족/.test(c.t)), vd.cards.map(c => c.t).join(' / '));
+  check('암장 날 칼로리 부족 경고', vd.cards.some(c => c.lv === 'warn' && /암장 날 칼로리 부족/.test(c.t)));
   check('지난주 기록 없어도 이번 주 체중 흐름 표시', vd.cards.some(c => c.t === '이번 주 체중 흐름'));
-  const full3 = { b: [{ f: 'egg', q: 1 }], l: lunch.l, d: [{ f: 'rice', q: 1 }] };
-  scene({ '2026-11-09': { session: 'limit', food: full3 }, '2026-11-11': { food: full3 }, '2026-11-13': { session: 'volume', food: full3 } }, { startWeight: 65.5, targetWeight: 63, goal: 'cut' });
-  vd = verdict('2026-11-09');
-  check('세 끼 다 적은 날 기준 단백질 부족 → 경고 + 다음 주 식단 반영', vd.flags.protein && vd.cards.some(c => c.lv === 'warn' && /단백질 부족/.test(c.t)) && !vd.cards.some(c => c.t === '조정 없음'), vd.cards.map(c => c.t).join(' / '));
-  scene({ '2026-11-09': { session: 'limit', food: lunch } }, { goal: 'cut' });
+  check('경고가 있으면 조정 없음 안 나옴', !vd.cards.some(c => c.t === '조정 없음'));
   const rp = buildReport('2026-11-09');
-  check('리포트: 운동량 열·미기록 끼니·식단 요약', /\| 운동량 \|/.test(rp) && /미기록: 아침·저녁/.test(rp) && /식단 기록 1일/.test(rp), rp.split('\n').find(l => l.startsWith('| 11/9')));
+  check('리포트: 운동량 열·식단 요약', /[|] 운동량 [|]/.test(rp) && /식단 기록 4일 · 평균 단백질/.test(rp), rp.split('\n').find(l => l.startsWith('| 11/9')));
 
   const bad = res.filter(x => !x.ok).length;
   document.getElementById('sum').textContent = `${res.length - bad} / ${res.length} 통과`;
