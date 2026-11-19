@@ -123,17 +123,20 @@
   check('음식 1200개 이상 · 편의점·재료 분류', FOODS.length >= 1200 && FOODS.some(f => f.c === '편의점') && FOODS.some(f => f.c === '재료·양념'), FOODS.length + '개');
 
   // 내 운동 기구: 덤벨 1·2·5kg, 철봉 없음
-  scene({}, { equip: { bar: false, table: false, db: [1, 2, 5] } });
+  scene({}, { equip: { bar: false, db: [1, 2, 5] } });
   const st = (sid, id) => (getSteps(sid, '2026-11-17').find(x => x.id === id) || {}).t || '';
   check('철봉 없음: 행잉 레그레이즈 → 바닥 레그레이즈', /바닥 레그레이즈|리버스 크런치|V업/.test(st('homeA', 'll')), st('homeA', 'll'));
   check('철봉 없음: 데드행 → 광배 스트레칭', /차일드 포즈/.test(st('homeB', 'dh')), st('homeB', 'dh'));
   check('철봉 없음: 풀업 → 원암 덤벨 로우 5kg', /원암 덤벨 로우/.test(st('homeC', 'p')) && /5kg/.test((getSteps('homeC', '2026-11-17').find(x => x.id === 'p') || {}).d), st('homeC', 'p'));
   check('외회전 1kg · 회내회외 2kg · 리버스 리스트컬 5kg', /1kg/.test(getSteps('homeA', '2026-11-17').find(x => x.id === 'er').d) && /2kg/.test(getSteps('homeA', '2026-11-17').find(x => x.id === 'pr').d) && /5kg/.test(getSteps('homeA', '2026-11-17').find(x => x.id === 'rc').d));
   check('남은 {kg} 표시 없음', ['homeA', 'homeB', 'homeC'].every(sid => getSteps(sid, '2026-11-17').every(x => !/\{kg\}/.test(x.t + x.d))));
-  scene({}, { equip: { bar: false, table: true, db: [1, 2, 5] } });
-  check('식탁 있음: 풀업 → 인버티드 로우', /인버티드 로우/.test(st('homeC', 'p')), st('homeC', 'p'));
+  scene({}, { equip: { bar: true, hangboard: true, band: true, db: [1, 2, 5] } });
+  check('행보드 있음: 집 C에 행보드 세트', getSteps('homeC', '2026-11-17').some(x => x.id === 'h'), getSteps('homeC', '2026-11-17').map(x => x.id).join(','));
+  check('밴드 있음: 워밍업에 밴드 풀어파트', /밴드 풀어파트/.test((getSteps('homeA', '2026-11-17').find(x => x.id === 'w') || {}).d));
+  scene({}, { level: 0, equip: { bar: true, band: true, db: [5] } });
+  check('입문 + 밴드: 밴드 보조 풀업', /밴드 보조 풀업/.test(st('homeC', 'p')), st('homeC', 'p'));
   scene({});
-  check('기구 설정 전: 기존대로 풀업', /풀업/.test(st('homeC', 'p')) && !/로우/.test(st('homeC', 'p')), st('homeC', 'p'));
+  check('기구 설정 전: 기존대로 풀업, 행보드 단계 없음', /풀업/.test(st('homeC', 'p')) && !/로우/.test(st('homeC', 'p')) && !getSteps('homeC', '2026-11-17').some(x => x.id === 'h'), st('homeC', 'p'));
 
   const bad = res.filter(x => !x.ok).length;
   document.getElementById('sum').textContent = `${res.length - bad} / ${res.length} 통과`;

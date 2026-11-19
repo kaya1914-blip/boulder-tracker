@@ -38,7 +38,7 @@ function equipCard() {
     <div class="card-h"><h2>${ic('dumbbell')}내 운동 기구</h2><span class="muted">${state.settings.equip ? '집 운동에 반영 중' : '기본값 사용 중'}</span></div>
     <p class="hint">가진 덤벨 무게를 모두 누르세요. 운동마다 맞는 무게를 골라 주고, 없는 기구가 필요한 운동은 대체 운동으로 바뀝니다.</p>
     <div class="eq-db" role="group" aria-label="덤벨 무게">${PLAN.dbChoices.map(k => `<button class="chipbtn ${has.includes(k) ? 'on' : ''}" data-act="eq-db" data-v="${k}" aria-pressed="${has.includes(k)}">${k}kg</button>`).join('')}</div>
-    <div class="trk">${tog('bar', '문틀 철봉', '풀업·매달리기 · 없으면 덤벨 로우 등으로 대체')}${tog('table', '튼튼한 식탁', '식탁 아래 인버티드 로우 (철봉 없을 때 당기기)')}</div>
+    <div class="trk">${tog('bar', '문틀 철봉', '풀업·매달리기·록오프 · 없으면 덤벨 로우 등으로 대체')}${tog('hangboard', '행보드', '집 C(근력 대체)에 행보드 세트 추가')}${tog('band', '저항 밴드', '워밍업 풀어파트 · 입문 단계 밴드 보조 풀업')}</div>
     ${e.bar ? '' : '<p class="hint">클라이밍에는 당기기 근력이 가장 중요합니다. 문틀 철봉(1~3만 원)이 생기면 켜 주세요. 풀업·매달리기·록오프가 들어갑니다.</p>'}
   </section>`;
 }

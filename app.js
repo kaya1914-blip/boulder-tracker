@@ -255,7 +255,7 @@ function pullFor(date) {
 function compensationDay(date) {
   const ds = weekDates(mondayOf(date));
   const c = ds.find(d => sessOn(d) === 'homeC');
-  if (!c || c >= date) return false;
+  if (!c || c >= date || equip().hangboard) return false; // 집에 행보드가 있으면 집 C에서 이미 함
   const next = ds.find(d => d > c && (sessOn(d) === 'limit' || sessOn(d) === 'volume'));
   return next === date;
 }
@@ -277,13 +277,14 @@ function dbPick(target) {
   if (target === 'max' || target == null) return l[l.length - 1];
   return l.reduce((b, k) => (Math.abs(k - target) < Math.abs(b - target) ? k : b), l[0]);
 }
-const equipText = () => { const e = equip(), l = (e.db || []).slice().sort((a, b) => a - b); return [e.bar ? '철봉' : '철봉 없음', l.length ? `덤벨 ${l.join('·')}kg` : '덤벨 없음', e.table ? '식탁 로우' : ''].filter(Boolean).join(' · '); };
+const equipText = () => { const e = equip(), l = (e.db || []).slice().sort((a, b) => a - b); return [e.bar ? '철봉' : '철봉 없음', e.hangboard ? '행보드' : '', e.band ? '밴드' : '', l.length ? `덤벨 ${l.join('·')}kg` : '덤벨 없음'].filter(Boolean).join(' · '); };
 function getSteps(sid, date) {
   const w = Math.max(1, weekNo(date)), cfg = weekCfg(w), mode = cfg.home, rec = !!cfg.recovery;
   const f = liveFlags(date), hang = hangFor(date), pull = pullFor(date);
   const home = sid === 'homeA' || sid === 'homeB';
   const T0 = tier();
   const list = (PLAN.steps[sid] || []).map(st0 => {
+    if (st0.needs && !equip()[st0.needs]) return null; // 그 기구가 있을 때만 하는 단계
     let st = st0;
     if (st0.from) { // 등급별 처방에서 가져오는 단계
       const src = T0[st0.from];
@@ -294,13 +295,19 @@ function getSteps(sid, date) {
     const ea = PLAN.equipAlt[sid + ':' + st.id];
     let altEx = null;
     if (ea && !equip()[ea.need]) {
-      const base = (equip().table && ea.altTable) || ea.alt;
-      if (base.t) st = Object.assign({}, st, { t: base.t, d: base.d, tm: null, deload: null });
-      else altEx = Object.assign({}, base, (ea.altT || {})[tierIdx()] || {});
+      if (ea.alt.t) st = Object.assign({}, st, { t: ea.alt.t, d: ea.alt.d, tm: null, deload: null });
+      else altEx = Object.assign({}, ea.alt, (ea.altT || {})[tierIdx()] || {});
+    }
+    // 기구가 있으면 더 좋은 방법으로 (밴드 보조 풀업 등)
+    const ep = PLAN.equipPlus[sid + ':' + st.id];
+    let plusEx = null;
+    if (!altEx && ep && equip()[ep.need] && (!ep.tiers || ep.tiers.includes(tierIdx()))) {
+      if (ep.t) st = Object.assign({}, st, { t: ep.t, d: ep.d });
+      else plusEx = ep.ex;
     }
     const o = { id: st.id, tag: st.tag, tm: st.tm && !altEx ? Object.assign({}, st.tm) : null };
     if (st.ex || altEx) {
-      const ex = altEx || Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {}, (PLAN.levelVariants[sid + ':' + st.id] || {})[lvl()] || {});
+      const ex = altEx || Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {}, (PLAN.levelVariants[sid + ':' + st.id] || {})[lvl()] || {}, plusEx || {});
       let { n, s, r, rest, reps, side, tip, tempo, parts } = ex;
       { const kg = dbPick(ex.db), w = kg ? kg + 'kg' : '맨손'; n = n.replace('{kg}', w); if (tip) tip = tip.replace('{kg}', w); } // 내 덤벨 무게로
       if (home && reps && (mode === 'reps' || mode === 'sets')) r = bump(r, 2);
