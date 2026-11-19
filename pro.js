@@ -30,6 +30,19 @@ function onboardCard() {
   return '';
 }
 
+// ---------- 내 운동 기구: 집 운동이 이 기구에 맞춰 바뀜 ----------
+function equipCard() {
+  const e = equip(), has = e.db || [];
+  const tog = (k, l, d) => `<button class="trk-btn ${e[k] ? 'on' : ''}" data-act="eq-tog" data-k="${k}" aria-pressed="${!!e[k]}"><b>${l}</b><small>${d}</small></button>`;
+  return `<section class="card" id="equip">
+    <div class="card-h"><h2>${ic('dumbbell')}내 운동 기구</h2><span class="muted">${state.settings.equip ? '집 운동에 반영 중' : '기본값 사용 중'}</span></div>
+    <p class="hint">가진 덤벨 무게를 모두 누르세요. 운동마다 맞는 무게를 골라 주고, 없는 기구가 필요한 운동은 대체 운동으로 바뀝니다.</p>
+    <div class="eq-db" role="group" aria-label="덤벨 무게">${PLAN.dbChoices.map(k => `<button class="chipbtn ${has.includes(k) ? 'on' : ''}" data-act="eq-db" data-v="${k}" aria-pressed="${has.includes(k)}">${k}kg</button>`).join('')}</div>
+    <div class="trk">${tog('bar', '문틀 철봉', '풀업·매달리기 · 없으면 덤벨 로우 등으로 대체')}${tog('table', '튼튼한 식탁', '식탁 아래 인버티드 로우 (철봉 없을 때 당기기)')}</div>
+    ${e.bar ? '' : '<p class="hint">클라이밍에는 당기기 근력이 가장 중요합니다. 문틀 철봉(1~3만 원)이 생기면 켜 주세요. 풀업·매달리기·록오프가 들어갑니다.</p>'}
+  </section>`;
+}
+
 // ---------- 기록 탭 안의 화면 고르기 ----------
 function recSeg() {
   const v = ui.recView || 'day';
@@ -315,6 +328,9 @@ document.addEventListener('click', e => {
   const val = id => (document.getElementById(id) || {}).value || '';
   const num = id => { const v = parseFloat(val(id)); return isNum(v) ? v : null; };
   switch (a) {
+    case 'eq-open': ui.tab = 'settings'; render(); setTimeout(() => { const el = document.getElementById('equip'); if (el) el.scrollIntoView({ block: 'start' }); }, 0); return;
+    case 'eq-tog': { const e = state.settings.equip = Object.assign({}, equip(), { db: (equip().db || []).slice() }); e[b.dataset.k] = !e[b.dataset.k]; return commit(); }
+    case 'eq-db': { const e = state.settings.equip = Object.assign({}, equip(), { db: (equip().db || []).slice() }), k = +b.dataset.v; e.db = e.db.includes(k) ? e.db.filter(x => x !== k) : e.db.concat(k); return commit(); }
     case 'track': state.settings.track = b.dataset.v; commit(); return toast(`${PLAN.tracks[b.dataset.v].name} 프로그램으로 맞췄어요`);
     case 'rec-view': ui.recView = b.dataset.v; window.scrollTo(0, 0); return render();
     case 'ou-style': ui.ouStyle = b.dataset.v; document.querySelectorAll('[data-act="ou-style"]').forEach(x => x.classList.toggle('on', x === b)); return;

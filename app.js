@@ -268,6 +268,16 @@ function restSec(str) {
   return null;
 }
 
+// ---------- 내 운동 기구 ----------
+const equip = () => state.settings.equip || PLAN.equipDefault;
+// 목표 무게에 가장 가까운 내 덤벨 (같으면 가벼운 쪽). 'max'면 가장 무거운 것. 덤벨이 없으면 null
+function dbPick(target) {
+  const l = (equip().db || []).slice().sort((a, b) => a - b);
+  if (!l.length) return null;
+  if (target === 'max' || target == null) return l[l.length - 1];
+  return l.reduce((b, k) => (Math.abs(k - target) < Math.abs(b - target) ? k : b), l[0]);
+}
+const equipText = () => { const e = equip(), l = (e.db || []).slice().sort((a, b) => a - b); return [e.bar ? '철봉' : '철봉 없음', l.length ? `덤벨 ${l.join('·')}kg` : '덤벨 없음', e.table ? '식탁 로우' : ''].filter(Boolean).join(' · '); };
 function getSteps(sid, date) {
   const w = Math.max(1, weekNo(date)), cfg = weekCfg(w), mode = cfg.home, rec = !!cfg.recovery;
   const f = liveFlags(date), hang = hangFor(date), pull = pullFor(date);
@@ -280,13 +290,22 @@ function getSteps(sid, date) {
       if (!src) return null;
       st = Object.assign({}, st0, { t: src.t, d: src.d, deload: src.deload, tm: src.tm });
     }
-    const o = { id: st.id, tag: st.tag, tm: st.tm ? Object.assign({}, st.tm) : null };
-    if (st.ex) {
-      const ex = Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {}, (PLAN.levelVariants[sid + ':' + st.id] || {})[lvl()] || {});
+    // 내 운동 기구에 없는 기구가 필요한 단계 → 대체 운동
+    const ea = PLAN.equipAlt[sid + ':' + st.id];
+    let altEx = null;
+    if (ea && !equip()[ea.need]) {
+      const base = (equip().table && ea.altTable) || ea.alt;
+      if (base.t) st = Object.assign({}, st, { t: base.t, d: base.d, tm: null, deload: null });
+      else altEx = Object.assign({}, base, (ea.altT || {})[tierIdx()] || {});
+    }
+    const o = { id: st.id, tag: st.tag, tm: st.tm && !altEx ? Object.assign({}, st.tm) : null };
+    if (st.ex || altEx) {
+      const ex = altEx || Object.assign({}, st.ex, (PLAN.variants[sid + ':' + st.id] || {})[tierIdx()] || {}, (PLAN.levelVariants[sid + ':' + st.id] || {})[lvl()] || {});
       let { n, s, r, rest, reps, side, tip, tempo, parts } = ex;
+      { const kg = dbPick(ex.db), w = kg ? kg + 'kg' : '맨손'; n = n.replace('{kg}', w); if (tip) tip = tip.replace('{kg}', w); } // 내 덤벨 무게로
       if (home && reps && (mode === 'reps' || mode === 'sets')) r = bump(r, 2);
       if (home && mode === 'sets') s += 1;
-      if (rec) { s = Math.min(s, 2); if (sid === 'homeC' && st.id === 'p') { s = 3; r = '4'; } }
+      if (rec) { s = Math.min(s, 2); if (sid === 'homeC' && st.id === 'p' && !altEx) { s = 3; r = '4'; } }
       o.t = `${n} ${s}×${r}`;
       o.d = [rest ? `휴식 ${rest}` : '', tip].filter(Boolean).join(' · ');
       if (home && !rec && mode === 'sets') o.note = '세트 +1';
@@ -727,8 +746,11 @@ function sessionBlock(date) {
     ${s.gym ? `<div class="seg hero-seg" role="group" aria-label="운동 시간">${['eve', 'day'].map(v => `<button class="${(x.time || 'eve') === v ? 'on' : ''}" data-act="time" data-date="${date}" data-v="${v}">${v === 'eve' ? '저녁 운동' : '낮 운동'}</button>`).join('')}</div>` : ''}
     ${sid === 'rest' ? '<p class="hero-why">오늘은 회복하는 날. 가벼운 걷기와 스트레칭만.</p>' : `<button class="btn-xl" data-act="focus" data-date="${date}"><span>${ic('play', 'fill')}${doneN === 0 ? '세션 시작' : doneN === active.length ? '다시 보기' : '이어하기'}</span><span class="btn-sub">${doneN}/${active.length} 단계</span></button>`}
   </section>`;
+  if (!s.gym && sid !== 'rest' && !equip().bar && sid === 'homeC') warns.push('철봉이 없어 당기기 운동을 덤벨·맨몸으로 바꿨습니다. 근력 대체 효과는 암장 근력 세션보다 약합니다.');
+  const eqLine = !s.gym && sid !== 'rest' ? `<button class="nag eq-nag" data-act="eq-open">${ic('dumbbell')}${state.settings.equip ? `내 기구: ${equipText()} · 바꾸기` : '내 운동 기구(덤벨 무게·철봉)를 설정하면 운동이 기구에 맞게 바뀝니다'}</button>` : '';
   const list = sid === 'rest' ? '' : `<section class="card">
     <div class="card-h"><h2>세션 단계</h2><span class="muted">${doneN}/${active.length} 완료</span></div>
+    ${eqLine}
     ${warns.map(t => `<p class="warn">${ic('alert')}${t}</p>`).join('')}
     <ol class="steps">${steps.map((st, i) => `<li class="step ${checks[st.id] ? 'on' : ''} ${st.skip ? 'skip' : ''}">
       <button class="step-main" data-act="step" data-date="${date}" data-id="${st.id}" ${st.skip ? 'disabled' : ''} aria-pressed="${!!checks[st.id]}">
@@ -1039,7 +1061,7 @@ function viewSettings() {
   const tg = targets(todayStr()), a = tg.auto;
   const lb = state.meta.lastBackup;
   return appbar('<span class="eb-tag">SETTINGS</span> 데이터는 이 기기에만 저장', '설정', null) +
-    trackCard() + levelCard() + themeCard() +
+    trackCard() + levelCard() + equipCard() + themeCard() +
     `<section class="card" id="profile"><div class="card-h"><h2>내 정보</h2><span class="muted">${profileSet() ? '입력됨' : '칼로리 계산에 사용'}</span></div>
       <h3 class="h3">성별</h3>${seg('sex', [['m', '남성'], ['f', '여성']])}
       <div class="fields2">

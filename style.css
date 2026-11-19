@@ -797,3 +797,6 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .qrow.qlink, .qrow.qest { border-style: dashed; background: transparent; }
 .qrow.qest { border-color: var(--accent); }
 .qrow > .ic { width: 18px; height: 18px; flex: none; color: var(--accent); }
+/* 내 운동 기구 */
+.eq-db { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.eq-nag { margin-bottom: 8px; }
