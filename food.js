@@ -102,7 +102,7 @@ function slotBlock(date, sl, items) {
   const sugText = sl.sug.map(([f, q]) => `${foodOf({ f }).n.replace(/ \(.*\)$/, '')} ${qtyText(q)}`).join(' + ');
   const key = date + ':' + sl.id, open = openSlots().has(key);
   if (!items.length && !open) { // 아직 안 먹은 끼니: 접어 두고 미기록 표시
-    return `<button class="slot slot-min slot-empty" data-act="f-toggle" data-key="${key}" aria-expanded="false" aria-label="${sl.t} 기록하기">
+    return `<button class="slot slot-min slot-empty" data-act="f-open" data-date="${date}" data-slot="${sl.id}" aria-label="${sl.t} 기록하기">
       <span class="sm-l"><b>${sl.t}</b><small>${sl.sug.length ? `아직 기록 안 함 · 추천 ${Math.round(sg.k)}kcal` : '아직 기록 안 함'}</small></span>
       <span class="sm-todo">기록하기</span>
       <span class="sm-chev">${ic('chevR')}</span></button>`;
@@ -145,18 +145,67 @@ function recentFoods() {
   }
   return Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).slice(0, 15).map(id => FOOD_MAP[id] || myFoods().find(f => f.id === id)).filter(Boolean);
 }
+// ---------- 검색: 띄어쓰기 무시 · 초성(ㄷㄱㅅ) · 글자 순서만 맞아도 · 자주 먹는 것 먼저 ----------
+const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const choOf = s => Array.from(s, c => { const k = c.charCodeAt(0) - 0xAC00; return k >= 0 && k < 11172 ? CHO[Math.floor(k / 588)] : c; }).join('');
+const inOrder = (q, n) => { let i = 0; for (const c of n) if (c === q[i]) i++; return i === q.length; };
+function searchFoods(raw) {
+  const q = raw.replace(/\s+/g, '').toLowerCase(), cho = /^[ㄱ-ㅎ]+$/.test(q), freq = foodFreq();
+  const out = [];
+  FOODS.concat(myFoods()).forEach(f => {
+    const n = f.n.replace(/\(.*?\)/g, '').replace(/\s+/g, '').toLowerCase(), a = (f.a || '').replace(/\s+/g, '').toLowerCase(); // 괄호 속 단위는 빼고 비교
+    let sc = 0;
+    if (cho) { const cn = f._cho || (f._cho = choOf(n)); sc = cn.startsWith(q) ? 70 : cn.includes(q) ? 50 : choOf(a).includes(q) ? 30 : 0; }
+    else sc = n === q ? 100 : n.startsWith(q) ? 80 : n.includes(q) ? 60 : a.includes(q) ? 45 : q.length >= 2 && inOrder(q, n) ? 20 : 0;
+    if (sc) out.push([sc + Math.min(15, (freq[f.id] || 0) * 2) - n.length * 0.1, f]);
+  });
+  return out.sort((x, y) => y[0] - x[0]).map(x => x[1]);
+}
+function foodFreq() {
+  const cnt = {};
+  for (let i = 0; i < 30; i++) Object.values(day(addDays(todayStr(), -i)).food || {}).flat().forEach(it => { if (it.f) cnt[it.f] = (cnt[it.f] || 0) + 1; });
+  return cnt;
+}
+// 한 번에 채우기: 추천 · 최근 같은 끼니(어제 등) · 내 조합 → 담기 목록에 통째로
+function quickSets(sh) {
+  const sl = slotsFor(sh.date).find(s => s.id === sh.slot) || { sug: [] }, out = [], seen = new Set();
+  const key = items => items.map(it => (it.f || it.n) + ':' + it.q).sort().join('|');
+  for (let i = 1; i <= 30 && out.length < 3; i++) {
+    const d = addDays(sh.date, -i), items = ((day(d).food || {})[sh.slot] || []).filter(it => it.f);
+    if (!items.length || seen.has(key(items))) continue;
+    seen.add(key(items)); out.push({ t: i === 1 ? '어제 그대로' : `${md(d)} 그대로`, items });
+  }
+  if (sl.sug && sl.sug.length) { const items = sugItems(sl.sug); if (!seen.has(key(items))) out.push({ t: '앱 추천', items }); }
+  myCombos().forEach(c => out.push({ t: '내 조합 · ' + c.n, items: c.items }));
+  return out;
+}
+function quickHtml(sh) {
+  sh.quick = quickSets(sh);
+  if (!sh.quick.length && sh.slot !== 'd') return '';
+  return `<div class="quick"><p class="quick-h">한 번에 채우기</p>${sh.quick.map((qs, i) => { const t = sumItems(qs.items); return `<button class="qrow" data-act="f-quick" data-i="${i}">
+      <span class="fr-n"><b>${esc(qs.t)}</b><small>${esc(qs.items.map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')}${it.q !== 1 ? ' ' + qtyText(it.q) : ''}`).join(' · '))}</small></span>
+      <span class="fr-k"><b>${Math.round(t.k)}</b><small>kcal · ${Math.round(t.p)}g</small></span><span class="fr-add">${ic('plus')}</span></button>`; }).join('')}
+    ${sh.slot === 'd' ? `<button class="qrow qlink" data-act="f-dinners">${ic('food')}<span class="fr-n"><b>추천 저녁 메뉴에서 고르기</b></span></button>` : ''}</div><p class="quick-h">음식 하나씩</p>`;
+}
 function sheetList() {
-  const sh = ui.sheet, q = (sh.q || '').trim().replace(/\s+/g, '');
-  let list;
-  if (q) list = FOODS.concat(myFoods()).filter(f => (f.n + ' ' + (f.a || '')).replace(/\s+/g, '').includes(q));
+  const sh = ui.sheet, raw = (sh.q || '').trim(), q = raw.replace(/\s+/g, '');
+  let list, head = '';
+  if (q) {
+    list = searchFoods(raw);
+    // 정확히 같은 이름이 없으면: 입력한 이름 그대로 한 번에 담기 (비슷한 음식 칼로리로 추정)
+    if (!/^[ㄱ-ㅎ]+$/.test(q) && !list.some(f => f.n.replace(/\s+/g, '') === q)) {
+      const e = estimateFood(raw);
+      head = `<button class="qrow qest" data-act="f-qest">${ic('plus')}<span class="fr-n"><b>"${esc(raw)}" 그대로 담기</b><small>${e ? `비슷한 음식 ${esc(e.n)} 기준 · 내 음식에 저장됨` : '칼로리를 몰라 직접 입력 칸을 엽니다'}</small></span>${e ? `<span class="fr-k"><b>${e.k}</b><small>kcal · ${e.p}g</small></span>` : ''}</button>`;
+    }
+  }
   else if (sh.cat === '자주') { list = recentFoods(); if (!list.length) list = FOODS.filter(f => f.c === '기본'); }
   else if (sh.cat === '내 음식') list = myFoods();
   else list = FOODS.filter(f => f.c === sh.cat);
   const added = {}, pend = {};
   ((day(sh.date).food || {})[sh.slot] || []).forEach(it => { if (it.f) added[it.f] = it.q; });
   sh.pend.forEach((it, i) => { if (it.f) pend[it.f] = i; });
-  if (!list.length) return `<p class="hint center">${q ? '검색 결과가 없습니다. 아래 "목록에 없는 음식"에 이름이나 재료를 넣으면 칼로리를 계산해 줍니다.' : sh.cat === '내 음식' ? '저장한 음식이 없습니다. 아래 직접 입력에서 "내 음식으로 저장"을 켜세요.' : '음식이 없습니다.'}</p>`;
-  return list.slice(0, 300).map(f => {
+  if (!list.length) return head + `<p class="hint center">${q ? '검색 결과가 없습니다. 아래 "목록에 없는 음식"에 이름이나 재료를 넣으면 칼로리를 계산해 줍니다.' : sh.cat === '내 음식' ? '저장한 음식이 없습니다. 아래 직접 입력에서 "내 음식으로 저장"을 켜세요.' : '음식이 없습니다.'}</p>`;
+  return (!q && sh.cat === '자주' ? quickHtml(sh) : '') + head + list.slice(0, 300).map(f => {
     const pi = pend[f.id], on = pi != null;
     return `<div class="frow ${on ? 'on' : ''}">
     <button class="frow-main" data-act="f-pick" data-f="${f.id}">
@@ -279,7 +328,7 @@ function renderSheet() {
   el.innerHTML = `<div class="sh-back" data-act="sheet-close"></div><div class="sh-panel" role="dialog" aria-label="${esc(slotName)}에 음식 추가">
     <div class="sh-grab"></div>
     <div class="sh-h"><h3>${esc(slotName)}<small>에 추가</small></h3><span class="sh-btns"><button class="sh-x" data-act="sheet-close" aria-label="닫기">${ic('close')}</button></span></div>
-    <label class="search">${ic('target')}<input id="fSearch" type="search" placeholder="음식 검색 (예: 계란, 김밥)" value="${esc(sh.q || '')}" autocomplete="off"></label>
+    <label class="search">${ic('target')}<input id="fSearch" type="search" placeholder="음식 검색 (예: 계란, ㄱㄹ, 김볶)" value="${esc(sh.q || '')}" autocomplete="off"></label>
     <div class="cats">${cats.map(c => `<button class="${!sh.q && sh.cat === c ? 'on' : ''}" data-act="f-cat" data-c="${c}">${c === '자주' ? '자주 먹는' : c}</button>`).join('')}</div>
     <div class="sh-list" id="fList">${sheetList()}</div>
     <details class="custom" ${sh.custom ? 'open' : ''}>
@@ -300,6 +349,11 @@ function renderSheet() {
     <button class="btn primary wide sh-commit" id="fCommit" data-act="f-commit">${commitLabel()}</button>
   </div>`;
   renderEst();
+}
+function clearSearch() {
+  ui.sheet.q = '';
+  const el = document.getElementById('fSearch'); if (el) { el.value = ''; el.focus(); }
+  document.querySelectorAll('.cats button').forEach(btn => btn.classList.toggle('on', btn.dataset.c === ui.sheet.cat));
 }
 function openSheet(s) { ui.sheet = s; document.body.classList.add('lock'); renderSheet(); }
 function closeSheet(force) {
@@ -379,6 +433,23 @@ document.addEventListener('click', e => {
     case 'f-pick': { // 담기만 하고, 완료를 눌러야 끼니에 들어감
       const p = ui.sheet.pend, f = b.dataset.f, ex = p.find(it => it.f === f);
       if (ex) ex.q = r1(ex.q + 0.5); else p.push({ f, q: 1 });
+      if (ui.sheet.q) clearSearch(); // 검색해서 담았으면 검색어를 지워 다음 음식을 바로 찾게
+      return refreshSheet();
+    }
+    case 'f-quick': {
+      const qs = (ui.sheet.quick || [])[+b.dataset.i]; if (!qs) return;
+      const p = ui.sheet.pend;
+      qs.items.forEach(it => { const ex = it.f && p.find(x => x.f === it.f); if (ex) ex.q = r1(ex.q + it.q); else p.push(Object.assign({}, it)); });
+      toast(`${qs.t} 담음 · 완료를 누르면 들어가요`);
+      return refreshSheet();
+    }
+    case 'f-qest': {
+      const n = (ui.sheet.q || '').trim(), e = estimateFood(n);
+      if (!e) { ui.sheet.custom = true; renderSheet(); const el = document.getElementById('cuN'); if (el) { el.value = n; el.focus(); renderEst(); } return; }
+      const id = 'my' + Date.now().toString(36);
+      myFoods().push({ id, n, u: e.u, k: e.k, p: e.p, c: '내 음식', s: 0.5, mine: true, a: '', est: 'name' });
+      ui.sheet.pend.push({ f: id, q: 1 }); save();
+      clearSearch(); toast(`${n} ${e.k}kcal 담음 (${e.n} 기준)`);
       return refreshSheet();
     }
     case 'f-pq': {

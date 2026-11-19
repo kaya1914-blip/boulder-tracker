@@ -789,3 +789,11 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .ou-imp summary::-webkit-details-marker { display: none; }
 .ou-imp textarea { width: 100%; resize: vertical; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 12px; padding: 11px 12px; font-size: 16px; margin: 8px 0; }
 .ou-imp .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 식단 시트: 한 번에 채우기 · 이름 그대로 담기 */
+.quick { margin: 4px 0 6px; }
+.quick-h { font-size: 12px; font-weight: 700; color: var(--muted); margin: 10px 0 4px; }
+.qrow { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; border: 1px solid var(--line-2); background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 6px; }
+.qrow .fr-n small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow.qlink, .qrow.qest { border-style: dashed; background: transparent; }
+.qrow.qest { border-color: var(--accent); }
+.qrow > .ic { width: 18px; height: 18px; flex: none; color: var(--accent); }

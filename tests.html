@@ -79,7 +79,7 @@
   check('쉬라는 날 고강도 → 다음 날 통증 감지', os.risky === 1 && os.painAfter === 1, JSON.stringify(os));
 
   const ing = parseIngredients('밥 1공기, 계란 2개, 스팸 50g');
-  check('재료 계산: 밥 310 + 계란 156 + 스팸 160 = 626kcal', ing.k === 626, ing.k);
+  check('재료 계산: 밥 310 + 생계란 150 + 스팸 160 = 620kcal', ing.k === 620, ing.k);
   check('이름 추정: 엄마표 김치볶음밥 → 김치볶음밥', (estimateFood('엄마표 김치볶음밥') || {}).n === '김치볶음밥');
   check('모든 음식 0.5인분 단위', FOODS.every(f => f.s === 0.5));
   check('음식 id 중복 없음', new Set(FOODS.map(f => f.id)).size === FOODS.length, FOODS.length + '개');
@@ -104,6 +104,23 @@
   check('경고가 있으면 조정 없음 안 나옴', !vd.cards.some(c => c.t === '조정 없음'));
   const rp = buildReport('2026-11-09');
   check('리포트: 운동량 열·식단 요약', /[|] 운동량 [|]/.test(rp) && /식단 기록 4일 · 평균 단백질/.test(rp), rp.split('\n').find(l => l.startsWith('| 11/9')));
+
+  // 아픈 날 · 아주 적게 먹은 날 · 오늘은 식단 평균에서 제외
+  scene({ '2026-11-16': { sick: true } });
+  check('아픈 날 → 휴식', recommend('2026-11-16').id === 'rest', recommend('2026-11-16').why);
+  check('아픈 날 컨디션 점수 60 미만', readiness('2026-11-16').score < 60, readiness('2026-11-16').score);
+  r = recommend('2026-11-17');
+  check('아픈 다음 날 → 고강도 아님', !['limit', 'strength'].includes(r.id), r.id + ' · ' + r.why);
+  const porridge = { b: [{ f: 'jeonbokjuk', q: 1 }], d: [{ f: 'jeonbokjuk', q: 1 }] };
+  scene({ '2026-11-10': { sick: true, food: porridge }, '2026-11-11': { food: porridge }, '2026-11-12': { food: porridge } });
+  vd = verdict('2026-11-09');
+  check('하루 1000kcal 미만 2일 이상 → 경고 + 아픈 날 안내', vd.cards.some(c => c.lv === 'warn' && /1000kcal 미만 3일/.test(c.t) && /아픈 날이 포함/.test(c.b)) && vd.cards.some(c => /아픈 날 1일/.test(c.t)), vd.cards.map(c => c.t).join(' / '));
+  const td = todayStr(), tm = mondayOf(td);
+  scene({ [td]: { food: { b: [{ f: 'egg', q: 1 }] } } });
+  check('오늘(아직 안 끝난 날)은 식단 평균에서 제외', weekStats(tm).diet.logged === 0, weekStats(tm).diet.logged);
+  check('초성 검색: ㄷㄱㅅ → 닭가슴살', searchFoods('ㄷㄱㅅ').slice(0, 3).some(f => /닭가슴살/.test(f.n)), searchFoods('ㄷㄱㅅ').slice(0, 3).map(f => f.n).join(', '));
+  check('줄임 검색: 김볶 → 김치볶음밥', searchFoods('김볶').slice(0, 3).some(f => f.n === '김치볶음밥'), searchFoods('김볶').slice(0, 3).map(f => f.n).join(', '));
+  check('음식 1200개 이상 · 편의점·재료 분류', FOODS.length >= 1200 && FOODS.some(f => f.c === '편의점') && FOODS.some(f => f.c === '재료·양념'), FOODS.length + '개');
 
   const bad = res.filter(x => !x.ok).length;
   document.getElementById('sum').textContent = `${res.length - bad} / ${res.length} 통과`;

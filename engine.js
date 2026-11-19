@@ -39,6 +39,8 @@ function readiness(date) {
   if (x.elbow) hit(20, '팔꿈치 통증');
   if (x.sore) hit(10, '근육통');
   if (x.weak) hit(15, '힘 떨어짐');
+  if (x.sick) hit(45, '아픔');
+  else if (day(addDays(date, -1)).sick) hit(15, '어제 아픔');
   if (rc.y) hit(Math.min(25, Math.round(rc.y.au / 60)), `어제 ${S(rc.y.id).short} ${rc.y.min}분·RPE ${rc.y.rpe}`);
   if (rc.consec >= 2) hit((rc.consec - 1) * 5, `${rc.consec}일 연속 운동`);
   if (rc.ratio && rc.acute >= RC().acwrMinLoad) hit(rc.ratio > RC().acwrMax ? 20 : rc.ratio > 1.3 ? 10 : 0, `7일 부하 평소의 ${rc.ratio.toFixed(1)}배`);
@@ -75,12 +77,15 @@ function recommend(date) {
   const sleepBad = liveFlags(date).short >= st.shortSleepDays || verdict(addDays(mon, -7)).flags.sleep;
   const yClimb = !!(y && S(y.id).gym);
   const fingerOk = !rc.pain && !(y && y.finger && (y.hard || rc.consec >= 2)) && !(T.noBackToBackClimb && yClimb);
-  const canHigh = fingerOk && rd.score >= R.readyHigh && !tHigh && !(rc.lastHardFinger && rc.lastHardFinger < R.highGapDays) && !(y && y.hard);
+  const ySick = !!day(addDays(date, -1)).sick;
+  const canHigh = !ySick && fingerOk && rd.score >= R.readyHigh && !tHigh && !(rc.lastHardFinger && rc.lastHardFinger < R.highGapDays) && !(y && y.hard);
   const has = id => remaining.includes(slotOf(id));
   const allowed = id => has(id) && (!isHigh(id) || canHigh) && (!usesFingers(id) || fingerOk);
   const pickFrom = list => list.find(allowed);
   let id, why;
-  if (rc.pain) {
+  if (day(date).sick) {
+    id = 'rest'; why = '아픈 날 → 오늘은 완전 휴식. 물을 충분히 드세요';
+  } else if (rc.pain) {
     id = pickFrom(['homeB']) || 'rest';
     why = '손가락 통증 기록 → 손가락 쓰는 운동은 쉬고 ' + (id === 'rest' ? '휴식' : '코어·모빌리티만');
   } else if (!remaining.length) {

@@ -562,6 +562,7 @@ const PLAN = {
     dayWorkoutLunch: [['rice', 1], ['egg', 2], ['tofu', 1]],
     fastLossExtra: ['bread', 1],
     rice: { gym: 2 / 3, rest: 1 / 3 },
+    lowKcal: 1000, // 하루 이만큼도 못 먹은 날이 2일 이상이면 주간 판정에서 경고
     // 끼니 추천의 기준 칼로리. 내 목표 칼로리가 이보다 많거나 적으면 밥 양을 0.5공기 단위로 늘리거나 줄입니다.
     refKcal: { gym: 1950, rest: 1650 },
     riceKcal: 300,             // 밥 1공기
