@@ -231,11 +231,14 @@ async function notify(title, body) {
 // ---------- 실행기 ----------
 let RUN = { on: false };
 function startRun(cfg, from) {
+  stopAlarm(); // 이전 타이머의 알람·음성 정리
+  try { speechSynthesis.cancel(); } catch (e) { /* 미지원 */ }
   unlockAudio();
   const c = JSON.parse(JSON.stringify(cfg));
   RUN = { on: true, cfg: c, phases: buildPhases(c), i: 0, paused: false, remain: 0, end: 0, lastSec: null, from: from || null, work: [], done: false };
   if (!RUN.phases.length) { RUN.on = false; return; }
   buildRunner();
+  if (typeof syncBack === 'function') syncBack();
   beginPhase(performance.now());
   keepAwake();
   bgStart();
@@ -295,13 +298,18 @@ function tickCore() {
   if (!RUN.on || RUN.done) return false;
   const now = performance.now();
   if (!RUN.paused) {
+    // 화면이 오래 꺼져 있다 켜지면 지나간 단계를 조용히 건너뛰고, 신호·알림은 지금 단계에서 한 번만
+    let advanced = false, phaseStart = RUN.end;
     while (RUN.end - now <= 0) {
       const p = RUN.phases[RUN.i];
       if (p.t === 'work') RUN.work.push(p);
       RUN.i++;
       if (RUN.i >= RUN.phases.length) { finishRun(false); return false; }
-      beginPhase(RUN.end);
+      phaseStart = RUN.end;
+      RUN.end = phaseStart + RUN.phases[RUN.i].d * 1000;
+      advanced = true;
     }
+    if (advanced) beginPhase(phaseStart);
   }
   const p = RUN.phases[RUN.i];
   const rem = RUN.paused ? RUN.remain : RUN.end - now;
@@ -373,6 +381,7 @@ function buildRunner() {
     <button class="r-plus" id="rPlus" data-act="r-plus">+15초</button>`;
 }
 function finishRun(stopped) {
+  stopAlarm();
   RUN.done = true;
   releaseAwake();
   bgStop();

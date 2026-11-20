@@ -12,9 +12,10 @@ function nextMonday() {
   d.setDate(d.getDate() + ((8 - d.getDay()) % 7));
   return ymd(d);
 }
+const isObj = v => !!v && typeof v === 'object' && !Array.isArray(v);
 function normalize(s) {
-  if (!s || typeof s !== 'object' || typeof s.days !== 'object') return null;
-  const saved = s.settings || {};
+  if (!isObj(s) || !isObj(s.days)) return null; // 손상된 백업 거부
+  const saved = isObj(s.settings) ? s.settings : {};
   // 예전 기록: 목표 종류가 없으면 시작·목표 체중으로 추정
   if (!('goal' in saved) && typeof saved.startWeight === 'number' && typeof saved.targetWeight === 'number') {
     saved.goal = saved.targetWeight < saved.startWeight ? 'cut' : saved.targetWeight > saved.startWeight ? 'gain' : 'keep';
@@ -22,9 +23,10 @@ function normalize(s) {
   s.settings = Object.assign({}, PLAN.defaults, saved);
   if (!s.settings.startDate) s.settings.startDate = nextMonday();
   if (!s.settings.targetDate) { const d = new Date(s.settings.startDate + 'T00:00:00'); d.setDate(d.getDate() + 27); s.settings.targetDate = ymd(d); }
-  s.weeks = s.weeks || {};
-  s.meta = s.meta || {};
-  s.timer = s.timer || {};
+  s.weeks = isObj(s.weeks) ? s.weeks : {};
+  s.meta = isObj(s.meta) ? s.meta : {};
+  s.timer = isObj(s.timer) ? s.timer : {};
+  if (s.inbody && !Array.isArray(s.inbody)) s.inbody = [];
   return s;
 }
 function load() {
@@ -350,18 +352,24 @@ function getSteps(sid, date) {
 // 오늘 세션 추천·회복 계산·체력 평가는 engine.js에 있습니다.
 
 // 운동 후 기록: 실제 시간과 힘든 정도(RPE). 다음 날 추천이 이 값으로 정해집니다.
-function loadCard(date) {
+// 운동 시간·RPE 입력 (오늘 화면 카드와 세션 완료 화면에서 같이 씀)
+function loadFields(date, compact) {
   const x = day(date), s = S(x.session);
   if (!s || x.session === 'rest') return '';
   const rpeTxt = r => !isNum(r) ? '' : r <= 3 ? '가벼움' : r <= 5 ? '보통' : r <= 7 ? '힘듦' : r <= 9 ? '매우 힘듦' : '한계';
-  return `<section class="card">
-    <div class="card-h"><h2>운동량</h2><span class="muted">다음 날 추천에 반영</span></div>
+  return `${compact ? '<div class="f-load-h"><b>운동량 기록</b><span class="muted">다음 날 회복 추천에 반영</span></div>' : ''}
     <div class="metrics2">
       ${bigStepper(date, 'dur', '운동 시간', '분', 15, String(s.min))}
       ${bigStepper(date, 'rpe', `힘든 정도 ${rpeTxt(x.rpe)}`, '/10', 1, String(DEF_RPE[s.intensity]))}
     </div>
-    <p class="hint">RPE 1 = 산책, 5 = 대화 가능한 정도, 8 = 빡셈, 10 = 더는 못 함. 비워 두면 ${s.min}분 · RPE ${DEF_RPE[s.intensity]}로 봅니다.</p>
-  </section>`;
+    <p class="hint">${compact ? `비워 두면 ${s.min}분 · RPE ${DEF_RPE[s.intensity]}로 계산합니다.` : `RPE 1 = 산책, 5 = 대화 가능한 정도, 8 = 빡셈, 10 = 더는 못 함. 비워 두면 ${s.min}분 · RPE ${DEF_RPE[s.intensity]}로 봅니다.`}</p>`;
+}
+function loadCard(date) {
+  const inner = loadFields(date, false);
+  return inner ? `<section class="card">
+    <div class="card-h"><h2>운동량</h2><span class="muted">다음 날 추천에 반영</span></div>
+    ${inner}
+  </section>` : '';
 }
 
 // ---------- 주간 통계·판정 ----------
@@ -856,11 +864,12 @@ function renderFocus() {
   const bars = steps.map((st, k) => `<i class="${checks[st.id] ? 'done' : ''} ${st.skip ? 'skip' : ''} ${k === i ? 'cur' : ''}"></i>`).join('');
   let body;
   if (i >= steps.length) {
-    const metrics = metricFields(d, sid);
+    const metrics = metricFields(d, sid), loadBox = loadFields(d, true);
     body = `<div class="f-body f-end">
       <div class="f-trophy">${ic('check')}</div>
       <h2 class="f-name">세션 완료</h2>
       <p class="f-desc">${steps.filter(st => checks[st.id]).length}/${steps.filter(st => !st.skip).length} 단계를 마쳤습니다. 수고했어요.</p>
+      ${loadBox ? `<div class="f-metrics f-load">${loadBox}</div>` : ''}
       ${metrics ? `<div class="f-metrics">${metrics}</div>` : ''}
     </div>
     <div class="f-ctrl"><button class="f-nav" data-act="f-move" data-delta="-1" aria-label="이전 단계">${ic('chevL')}</button><button class="btn-xl" data-act="f-close">${ic('check')}닫기</button><span class="f-nav-sp"></span></div>`;
@@ -1080,6 +1089,7 @@ function viewSettings() {
         ${num('inbodyBmr', '기초대사량 (kcal)', 1, '인바디 결과지 값')}
         <label class="field"><span>측정일</span><input type="date" data-field="set:inbodyDate" value="${st.inbodyDate || ''}"></label>
       </div>
+      ${inbodySection()}
       <p class="hint">인바디 기초대사량이 있으면 그 값을, 체지방률만 있으면 제지방량으로 계산하고, 둘 다 없으면 나이·키·체중으로 계산합니다. 인바디는 같은 조건(아침 공복, 운동 전)에서 4~8주마다 재면 추세를 보기 좋습니다.</p>
     </section>
     <section class="card"><div class="card-h"><h2>체중 목표</h2><span class="muted">${GOALS[goalOf()]}</span></div>
@@ -1255,14 +1265,16 @@ document.addEventListener('click', e => {
     case 'export': return exportData();
     case 'import': return document.getElementById('importFile').click();
     case 'reset':
-      if (confirm('모든 기록을 지웁니다. 되돌릴 수 없습니다. 먼저 백업하셨나요?') && confirm('정말 지울까요?')) { state = freshState(); commit(); toast('기록을 지웠습니다'); }
+      if (confirm('모든 기록을 지웁니다. 되돌릴 수 없습니다. 먼저 백업하셨나요?') && confirm('정말 지울까요?')) {
+        snapForce().finally(() => { state = freshState(); commit(); toast('기록을 지웠습니다 (직전 상태는 스냅샷에 남겨 둠)'); });
+      }
       return;
   }
 });
 
 document.addEventListener('change', e => {
   const el = e.target;
-  if (el.id === 'importFile') return importData(el.files[0]);
+  if (el.id === 'importFile') { const f0 = el.files[0]; el.value = ''; return importData(f0); } // 같은 파일도 다시 고를 수 있게
   const f = el.dataset.field;
   if (!f) return;
   if (f.startsWith('set:')) {
@@ -1285,7 +1297,14 @@ document.addEventListener('change', e => {
     const v = parseFloat(el.value);
     if (el.value === '') delete x[f];
     else if (!isNum(v)) { toast('숫자를 입력해 주세요'); return render(); }
-    else x[f] = Math.round(v * 10) / 10;
+    else {
+      let n = Math.round(v * 10) / 10;
+      if (f === 'rpe') n = Math.min(10, Math.max(1, n));
+      else if (f === 'sleep') n = Math.min(24, Math.max(0, n));
+      else if (f === 'dur') n = Math.max(0, n);
+      else if (f === 'weight' && n <= 0) { toast('체중은 0보다 커야 합니다'); return render(); }
+      x[f] = n;
+    }
   } else if (el.value === '') delete x[f];
   else x[f] = el.value;
   if (f === 'session' && x.session && !x.time && S(x.session).gym) x.time = 'eve';
@@ -1302,7 +1321,7 @@ function exportData() {
 function importData(file) {
   if (!file) return;
   const r = new FileReader();
-  r.onload = () => {
+  r.onload = async () => {
     try {
       const raw = JSON.parse(r.result);
       // 일부 기록 파일(partial): 지금 기록은 그대로 두고 그 날짜만 합칩니다
@@ -1316,7 +1335,8 @@ function importData(file) {
       const s = normalize(raw);
       if (!s) throw new Error('형식');
       if (!confirm(`백업에서 기록 ${Object.keys(s.days).length}일치를 불러옵니다. 지금 기록은 백업 내용으로 바뀝니다. 계속할까요?`)) return;
-      state = s; applyTheme(); commit(); toast('불러왔습니다');
+      await snapForce(); // 덮어쓰기 직전 상태를 스냅샷으로
+      state = s; applyTheme(); commit(); toast('불러왔습니다 (이전 상태는 스냅샷에 남겨 둠)');
     } catch (e) { toast('이 파일은 트래커 백업이 아닙니다'); }
   };
   r.readAsText(file);
@@ -1334,5 +1354,9 @@ document.addEventListener('visibilitychange', () => {
 if (!window.BT_TEST) window.addEventListener('DOMContentLoaded', () => {
   applyTheme();
   render();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    const hadCtrl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    if (hadCtrl) navigator.serviceWorker.addEventListener('controllerchange', () => toast('새 버전으로 업데이트되었어요'));
+  }
 });

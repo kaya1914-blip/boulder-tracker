@@ -3,6 +3,31 @@
 
 const outs = () => (state.outdoor = state.outdoor || []);
 const tests = () => (state.tests = state.tests || []);
+// 인바디 이력: 저장할 때마다 쌓고, 가장 최근 값이 설정(칼로리 계산)에 들어감
+const inbodies = () => (state.inbody = Array.isArray(state.inbody) ? state.inbody : []);
+const byDateDesc = (a, b) => (b.date + (b.id || '')).localeCompare(a.date + (a.id || ''));
+function syncInbodySettings() {
+  const top = inbodies().slice().sort(byDateDesc)[0];
+  if (!top) return;
+  const st = state.settings;
+  st.bodyFat = isNum(top.bodyFat) ? top.bodyFat : null;
+  st.smm = isNum(top.smm) ? top.smm : null;
+  st.inbodyBmr = isNum(top.bmr) ? top.bmr : null;
+  st.inbodyDate = top.date || null;
+}
+function inbodyDelta(a, b) {
+  const bits = [];
+  if (isNum(a.bodyFat) && isNum(b.bodyFat)) { const d = a.bodyFat - b.bodyFat; bits.push(`체지방 ${d > 0 ? '+' : ''}${d.toFixed(1)}%p`); }
+  if (isNum(a.smm) && isNum(b.smm)) { const d = a.smm - b.smm; bits.push(`골격근 ${d > 0 ? '+' : ''}${d.toFixed(1)}kg`); }
+  if (isNum(a.bmr) && isNum(b.bmr)) { const d = a.bmr - b.bmr; bits.push(`기초대사량 ${d > 0 ? '+' : ''}${Math.round(d)}kcal`); }
+  return bits.join(' · ');
+}
+function inbodySection() {
+  const list = inbodies().slice().sort(byDateDesc), dl = list.length >= 2 ? inbodyDelta(list[0], list[1]) : '';
+  return `<button class="btn wide ib-save" data-act="ib-add">${ic('plus')}지금 인바디 값을 기록에 저장</button>
+    ${dl ? `<p class="ib-diff">직전(${md(list[1].date)}) 대비 · <b>${dl}</b></p>` : ''}
+    ${list.length ? `<div class="tbl ib-hist"><table><thead><tr><th>날짜</th><th>체중</th><th>체지방</th><th>골격근</th><th>BMR</th><th></th></tr></thead><tbody>${list.map(x => `<tr><td>${md(x.date)}</td><td>${isNum(x.bw) ? x.bw.toFixed(1) : '—'}</td><td>${isNum(x.bodyFat) ? x.bodyFat + '%' : '—'}</td><td>${isNum(x.smm) ? x.smm + 'kg' : '—'}</td><td>${isNum(x.bmr) ? x.bmr : '—'}</td><td><button class="fr-del" data-act="ib-del" data-id="${x.id}" aria-label="삭제">${ic('close')}</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
+}
 const STYLE = { flash: '플래시', send: '완등', project: '프로젝트' };
 const vOpts = (sel, max = 13) => Array.from({ length: max + 1 }, (_, v) => `<option value="${v}" ${v === sel ? 'selected' : ''}>V${v}</option>`).join('');
 const vTxt = v => (isNum(v) ? 'V' + (Math.round(v * 10) / 10).toString().replace(/\.0$/, '') : '—');
@@ -114,6 +139,9 @@ document.addEventListener('change', e => {
     document.getElementById('ouNnewF').classList.toggle('hide', e.target.value !== NEW);
     const v = e.target.selectedOptions[0] && e.target.selectedOptions[0].dataset.v; // 다시 시도하는 문제면 등급 자동
     if (v != null) document.getElementById('ouV').value = v;
+  } else if (id === 'ouFarea') {
+    ui.ouFilterArea = e.target.value;
+    render();
   }
 });
 function outdoorView() {
@@ -126,20 +154,27 @@ function outdoorView() {
   for (let v = top; v >= Math.max(0, top - 4); v--) pyr.push([v, sends.filter(o => o.v === v).length, list.filter(o => o.v === v && o.style === 'project').length]);
   const mx = Math.max(1, ...pyr.map(p => p[1] + p[2]));
   const last = list[0] || {};
-  return `<section class="card">
-      <div class="card-h"><h2>${ic('plus')}완등·시도 기록</h2></div>
+  // 고치는 중인 기록이 있으면 폼에 그 값을 채움
+  const ed = ui.ouEditId ? list.find(o => o.id === ui.ouEditId) : null;
+  const formArea = ed ? (ed.area || '') : (ui.ouArea ?? last.area ?? '');
+  const formStyle = ed ? ed.style : (ui.ouStyle || 'send');
+  const areas = [...new Set(list.map(o => o.area).filter(Boolean))];
+  const fStyle = ui.ouFilterStyle || 'all', fArea = areas.includes(ui.ouFilterArea) ? ui.ouFilterArea : '';
+  const shown = list.filter(o => (fStyle === 'all' || (fStyle === 'project' ? o.style === 'project' : o.style !== 'project')) && (!fArea || o.area === fArea));
+  return `<section class="card" id="ouForm">
+      <div class="card-h"><h2>${ic(ed ? 'swap' : 'plus')}${ed ? '기록 고치기' : '완등·시도 기록'}</h2>${ed ? '<button class="sa-btn ghost" data-act="ou-edit-cancel">취소</button>' : ''}</div>
       <div class="fields2">
-        <label class="field"><span>날짜</span><input type="date" id="ouD" value="${todayStr()}"></label>
-        <label class="field"><span>등급</span><select id="ouV">${vOpts(isNum(last.v) ? last.v : lvl())}</select></label>
-        <label class="field"><span>지역 · 바위</span><select id="ouA">${cragOptions(ui.ouArea ?? last.area ?? '')}</select></label>
-        <label class="field ${ui.ouArea === NEW ? '' : 'hide'}" id="ouAnewF"><span>새 지역 이름</span><input type="text" id="ouAnew" placeholder="예: 북한산 · 인수봉 아래"></label>
-        <label class="field"><span>문제 이름</span><select id="ouN">${problemOptions(curArea(last))}</select></label>
-        <label class="field ${probNew(curArea(last)) ? '' : 'hide'}" id="ouNnewF"><span>새 문제 이름</span><input type="text" id="ouNnew" placeholder="예: 슬랩 왕"></label>
-        <label class="field"><span>시도 횟수</span><input type="number" inputmode="numeric" id="ouT" placeholder="예: 3"></label>
+        <label class="field"><span>날짜</span><input type="date" id="ouD" value="${ed ? ed.date : todayStr()}"></label>
+        <label class="field"><span>등급</span><select id="ouV">${vOpts(ed ? ed.v : (isNum(last.v) ? last.v : lvl()))}</select></label>
+        <label class="field"><span>지역 · 바위</span><select id="ouA">${cragOptions(formArea)}</select></label>
+        <label class="field ${formArea === NEW ? '' : 'hide'}" id="ouAnewF"><span>새 지역 이름</span><input type="text" id="ouAnew" placeholder="예: 북한산 · 인수봉 아래"></label>
+        <label class="field"><span>문제 이름</span><select id="ouN">${problemOptions(formArea)}</select></label>
+        <label class="field ${probNew(formArea) ? '' : 'hide'}" id="ouNnewF"><span>새 문제 이름</span><input type="text" id="ouNnew" placeholder="예: 슬랩 왕"></label>
+        <label class="field"><span>시도 횟수</span><input type="number" inputmode="numeric" id="ouT" placeholder="예: 3" value="${ed && isNum(ed.tries) ? ed.tries : ''}"></label>
       </div>
-      <div class="seg theme-seg" role="group" aria-label="결과">${Object.entries(STYLE).map(([k, l]) => `<button class="${(ui.ouStyle || 'send') === k ? 'on' : ''}" data-act="ou-style" data-v="${k}">${l}</button>`).join('')}</div>
-      <label class="field"><span>메모</span><input type="text" id="ouM" placeholder="홀드·베타·컨디션"></label>
-      <button class="btn primary wide" data-act="ou-add">${ic('check')}기록하기</button>
+      <div class="seg theme-seg" role="group" aria-label="결과">${Object.entries(STYLE).map(([k, l]) => `<button class="${formStyle === k ? 'on' : ''}" data-act="ou-style" data-v="${k}">${l}</button>`).join('')}</div>
+      <label class="field"><span>메모</span><input type="text" id="ouM" placeholder="홀드·베타·컨디션" value="${ed ? esc(ed.note || '') : ''}"></label>
+      <button class="btn primary wide" data-act="ou-add">${ic('check')}${ed ? '고친 내용 저장' : '기록하기'}</button>
       <p class="hint">플래시 = 첫 시도 완등(남의 베타를 봤어도 포함) · 완등 = 여러 번 만에 완등 · 프로젝트 = 아직 못 함</p>
     </section>
     <details class="card ou-imp"${ui.ouImpOpen ? ' open' : ''}>
@@ -152,23 +187,65 @@ function outdoorView() {
       <div class="stat num"><b>${vTxt(best)}</b><span>최고 완등</span><small>${isNum(sl.outdoor) ? '최근 180일 ' + vTxt(sl.outdoor) : ''}</small></div>
       <div class="stat num"><b>${sends.length}</b><span>완등</span><small>플래시 ${sends.filter(o => o.style === 'flash').length}</small></div>
       <div class="stat num"><b>${list.filter(o => o.style === 'project').length}</b><span>프로젝트</span><small>진행 중</small></div>
-      <div class="stat num"><b>${new Set(list.map(o => o.date)).size}</b><span>바위 간 날</span><small>${new Set(list.map(o => o.area).filter(Boolean)).size}곳</small></div>
+      <div class="stat num"><b>${new Set(list.map(o => o.date)).size}</b><span>바위 간 날</span><small>${areas.length}곳</small></div>
     </section>
     <section class="card"><div class="card-h"><h2>등급 피라미드</h2><span class="muted">완등 · 프로젝트</span></div>
       ${list.length ? `<div class="pyr">${pyr.map(([v, s, p]) => `<div class="py-row"><span class="py-v">V${v}</span><span class="py-bar"><i class="s" style="width:${s / mx * 100}%"></i><i class="p" style="width:${p / mx * 100}%"></i></span><span class="py-n">${s}${p ? ` <small>+${p}</small>` : ''}</span></div>`).join('')}</div>
       <p class="hint">한 단계 아래 등급 완등이 위 등급의 2~3배쯤 쌓이면 다음 등급에 도전할 기반이 있다고 봅니다.</p>` : '<p class="hint">아직 기록이 없습니다. 자연 바위 완등을 적으면 실제 실력이 체력 측정의 "완등 등급"에 반영됩니다.</p>'}
     </section>
-    ${list.length ? `<section class="card"><div class="card-h"><h2>최근 기록</h2><span class="muted">${list.length}개</span></div><ul class="hist ou-list">${list.slice(0, 50).map(o => `<li><span class="ou-v s-${o.style}">V${o.v}</span><span class="ou-m"><b>${esc(o.name || '이름 없음')}</b><small>${md(o.date)} · ${esc(o.area || '')} · ${STYLE[o.style]}${isNum(o.tries) ? ` · ${o.tries}번` : ''}${o.note ? ' · ' + esc(o.note) : ''}</small></span><button class="fr-del" data-act="ou-del" data-id="${o.id}" aria-label="삭제">${ic('close')}</button></li>`).join('')}</ul></section>` : ''}`;
+    ${list.length ? `<section class="card"><div class="card-h"><h2>기록</h2><span class="muted">${shown.length}${shown.length !== list.length ? '/' + list.length : ''}개</span></div>
+      <div class="ou-filters">
+        <div class="cats">${[['all', '전체'], ['sent', '완등'], ['project', '프로젝트']].map(([k, l]) => `<button class="${fStyle === k ? 'on' : ''}" data-act="ou-fstyle" data-v="${k}">${l}</button>`).join('')}</div>
+        ${areas.length >= 2 ? `<select id="ouFarea" class="ou-farea" aria-label="지역 필터"><option value="">전체 지역</option>${areas.map(a => `<option value="${esc(a)}" ${fArea === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>` : ''}
+      </div>
+      ${shown.length ? `<ul class="hist ou-list">${shown.slice(0, 60).map(o => `<li>
+        <span class="ou-v s-${o.style}">V${o.v}</span>
+        <span class="ou-m"><b>${esc(o.name || '이름 없음')}</b><small>${md(o.date)} · ${esc(o.area || '')} · ${STYLE[o.style]}${isNum(o.tries) ? ` · ${o.tries}번` : ''}${o.note ? ' · ' + esc(o.note) : ''}</small></span>
+        <span class="ou-acts">
+          ${o.style === 'project' ? `<button class="ou-btn" data-act="ou-try" data-id="${o.id}" aria-label="시도 1번 추가">+1</button><button class="ou-btn ok" data-act="ou-send" data-id="${o.id}">완등</button>` : ''}
+          <button class="fr-del" data-act="ou-edit" data-id="${o.id}" aria-label="고치기">${ic('swap')}</button>
+          <button class="fr-del" data-act="ou-del" data-id="${o.id}" aria-label="삭제">${ic('close')}</button>
+        </span>
+      </li>`).join('')}</ul>` : '<p class="hint center">조건에 맞는 기록이 없습니다.</p>'}
+    </section>` : ''}`;
 }
 
 // ---------- 체력 측정: 체중 대비 근력 ----------
+// 행보드·풀업 체중 대비 %의 추이 (측정 2번 이상일 때)
+function benchChart(ts) {
+  const chron = ts.slice().reverse().map(x => ({ x, b: benchOf(x) })).filter(o => o.b && (isNum(o.b.hangPct) || isNum(o.b.pullPct)));
+  if (chron.length < 2) return '';
+  const nextV = Math.min(10, lvl() + 1), refRow = PLAN.bench.hang.find(([, v]) => v === nextV), refPct = refRow ? refRow[0] : null;
+  const vals = chron.flatMap(o => [o.b.hangPct, o.b.pullPct]).filter(isNum).concat(isNum(refPct) ? [refPct] : []);
+  const y0 = Math.floor((Math.min(...vals) - 8) / 10) * 10, y1 = Math.ceil((Math.max(...vals) + 8) / 10) * 10;
+  const W = 340, H = 190, L = 34, R = 14, T = 14, B = 24;
+  const X = i => +(L + (i / (chron.length - 1)) * (W - L - R)).toFixed(1);
+  const Y = v => +(T + ((y1 - v) / Math.max(10, y1 - y0)) * (H - T - B)).toFixed(1);
+  let g = '';
+  const stepY = y1 - y0 > 60 ? 20 : 10;
+  for (let v = y0; v <= y1; v += stepY) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="c-grid"/><text x="${L - 5}" y="${Y(v) + 3.5}" class="c-lbl" text-anchor="end">${v}%</text>`;
+  if (isNum(refPct)) g += `<line x1="${L}" x2="${W - R}" y1="${Y(refPct)}" y2="${Y(refPct)}" class="c-goal"/><text x="${W - R}" y="${Y(refPct) - 4}" class="c-goal-lbl" text-anchor="end">V${nextV} 행보드 기준 ${refPct}%</text>`;
+  const every = chron.length > 6 ? Math.ceil(chron.length / 5) : 1;
+  chron.forEach((o, i) => { if (i % every === 0 || i === chron.length - 1) g += `<text x="${X(i)}" y="${H - 6}" class="c-lbl" text-anchor="middle">${md(o.x.date)}</text>`; });
+  const series = (key, cls) => {
+    const pts = chron.map((o, i) => (isNum(o.b[key]) ? { x: X(i), y: Y(o.b[key]), v: o.b[key], d: o.x.date } : null)).filter(Boolean);
+    if (pts.length >= 2) g += `<polyline points="${pts.map(p => `${p.x},${p.y}`).join(' ')}" class="${cls}"/>`;
+    pts.forEach(p => { g += `<circle cx="${p.x}" cy="${p.y}" r="3.6" class="${cls}-dot"><title>${md(p.d)} ${p.v.toFixed(0)}%</title></circle>`; });
+  };
+  series('hangPct', 'c-hang'); series('pullPct', 'c-pull');
+  return `<section class="card"><div class="card-h"><h2>근력 추이 (체중 대비)</h2><span class="muted">${chron.length}회 측정</span></div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart bench-chart" role="img" aria-label="행보드와 풀업 체중 대비 근력 추이">${g}</svg>
+    <div class="legend"><span><i class="lg-hang"></i>행보드</span><span><i class="lg-pull"></i>풀업</span>${isNum(refPct) ? `<span><i class="lg-goal"></i>V${nextV} 기준</span>` : ''}</div>
+  </section>`;
+}
 function benchView() {
-  const ts = tests().slice().sort((a, b) => b.date.localeCompare(a.date));
-  const t = ts[0], b = benchOf(t), sl = sendLevel(), dg = diagnose(b, sl.v);
+  const ts = tests().slice().sort(byDateDesc);
+  const t = ts[0], b = benchOf(t), pb = ts[1] ? benchOf(ts[1]) : null, sl = sendLevel(), dg = diagnose(b, sl.v);
+  const delta = (cur, prev) => { if (!isNum(cur) || !isNum(prev)) return ''; const d = Math.round(cur - prev); return d ? ` <em class="bm-d ${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : ''}${d}%p</em>` : ''; };
   const wNow = curWeight(todayStr());
-  const bar = (label, v, cls) => `<div class="bm-row"><span>${label}</span><span class="bm-track">${Array.from({ length: 11 }, (_, i) => `<i style="left:${i * 10}%"></i>`).join('')}${isNum(v) ? `<b class="${cls}" style="left:${Math.min(100, v * 10)}%">${vTxt(v)}</b>` : ''}</span></div>`;
+  const bar = (label, v, cls) => `<div class="bm-row"><span>${label}</span><span class="bm-track">${Array.from({ length: 11 }, (_, i) => `<i style="left:${i * 10}%"></i>`).join('')}${isNum(v) ? `<b class="${cls}" style="left:${Math.max(0, Math.min(100, v * 10))}%">${vTxt(v)}</b>` : ''}</span></div>`;
   let whatIf = '';
-  if (b && isNum(t.hang)) {
+  if (b && isNum(t.hang) && t.bw > 30) {
     const load = t.bw + t.hang, m2 = (load / (t.bw - 2)) * 100, v2 = interpV(PLAN.bench.hang, m2);
     whatIf = `<li><span>체중 -2kg이면</span>같은 힘으로 행보드 ${m2.toFixed(0)}% → ${vTxt(v2)} (지금 ${vTxt(b.vh)})</li>`;
   }
@@ -191,8 +268,8 @@ function benchView() {
         ${bar('손가락 힘', b.vh, 'h')}${bar('당기는 힘', b.vp, 'p')}${bar('힘 종합', b.v, 'v')}${bar('완등 실력', sl.v >= 0 ? sl.v : null, 's')}
       </div>
       <ul class="plain">
-        ${isNum(b.hangPct) ? `<li><span>BM1000 20mm</span>체중의 <b>${b.hangPct.toFixed(0)}%</b> (${(t.bw + t.hang).toFixed(1)}kg) → 힘 기준 ${vTxt(b.vh)}</li>` : ''}
-        ${isNum(b.pullPct) ? `<li><span>풀업</span>체중의 <b>${b.pullPct.toFixed(0)}%</b>${isNum(t.pull) ? '' : ' (횟수로 추정)'} → 힘 기준 ${vTxt(b.vp)}</li>` : ''}
+        ${isNum(b.hangPct) ? `<li><span>BM1000 20mm</span>체중의 <b>${b.hangPct.toFixed(0)}%</b>${delta(b.hangPct, pb && pb.hangPct)} (${(t.bw + t.hang).toFixed(1)}kg) → 힘 기준 ${vTxt(b.vh)}</li>` : ''}
+        ${isNum(b.pullPct) ? `<li><span>풀업</span>체중의 <b>${b.pullPct.toFixed(0)}%</b>${delta(b.pullPct, pb && pb.pullPct)}${isNum(t.pull) ? '' : ' (횟수로 추정)'} → 힘 기준 ${vTxt(b.vp)}</li>` : ''}
         <li><span>완등</span>${sl.v >= 0 ? `V${sl.v}` : '—'} ${isNum(sl.outdoor) ? `(자연 바위 최근 180일 최고 ${vTxt(sl.outdoor)})` : '(설정한 레벨 · 자연 바위 기록을 넣으면 반영)'}</li>
         ${isNum(state.settings.bodyFat) || isNum(state.settings.smm) ? `<li><span>인바디</span>${isNum(state.settings.bodyFat) ? `체지방률 ${state.settings.bodyFat}% · 제지방량 ${(t.bw * (1 - state.settings.bodyFat / 100)).toFixed(1)}kg` : ''}${isNum(state.settings.smm) ? ` · 골격근량 ${state.settings.smm}kg` : ''}${isNum(state.settings.bodyFat) && isNum(t.hang) ? `<br>체지방만 2kg 줄이면 행보드 ${((t.bw + t.hang) / (t.bw - 2) * 100).toFixed(0)}% (근육은 그대로일 때)` : ''}</li>` : ''}
         ${isNum(b.bmi) ? `<li><span>체격</span>BMI ${b.bmi.toFixed(1)}${isNum(b.ape) ? ` · 리치 지수 ${b.ape > 0 ? '+' : ''}${b.ape}cm (${b.ape >= 3 ? '팔이 긴 편, 먼 홀드에 유리' : b.ape <= -3 ? '팔이 짧은 편, 발·몸 위치로 거리 보완' : '보통'})` : ''}</li>` : ''}
@@ -201,13 +278,17 @@ function benchView() {
       ${dg ? `<div class="vcard ${dg.k === 'bal' ? 'ok' : 'info'}"><span class="v-ic">${ic('spark')}</span><div><b>${dg.t}</b><p>${dg.d}</p></div></div>` : ''}
       <p class="hint">등급 대응은 공개된 클라이머 근력 조사 경향을 단순화한 대략치입니다. 같은 힘이라도 기술·체형·스타일(슬랩·오버행)에 따라 2등급 이상 차이 날 수 있습니다.</p>
     </section>` : '<section class="card"><p class="hint">측정을 저장하면 체중 대비 손가락·당기는 힘으로 예상 등급을 계산하고, 실제 완등 등급과 비교해 힘과 기술 중 무엇이 부족한지 알려 줍니다.</p></section>'}
-    ${ts.length > 1 ? `<section class="card"><div class="card-h"><h2>측정 기록</h2></div><div class="tbl"><table><thead><tr><th>날짜</th><th>체중</th><th>행보드</th><th>풀업</th><th>힘 기준</th><th></th></tr></thead><tbody>${ts.map(x => { const y = benchOf(x); return `<tr><td>${md(x.date)}</td><td>${x.bw}</td><td>${isNum(y.hangPct) ? y.hangPct.toFixed(0) + '%' : '—'}</td><td>${isNum(y.pullPct) ? y.pullPct.toFixed(0) + '%' : '—'}</td><td>${vTxt(y.v)}</td><td><button class="fr-del" data-act="bn-del" data-id="${x.id}" aria-label="삭제">${ic('close')}</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}`;
+    ${benchChart(ts)}
+    ${ts.length ? `<section class="card"><div class="card-h"><h2>측정 기록</h2><span class="muted">${ts.length}회</span></div><div class="tbl"><table><thead><tr><th>날짜</th><th>체중</th><th>행보드</th><th>풀업</th><th>힘 기준</th><th></th></tr></thead><tbody>${ts.map(x => { const y = benchOf(x); return `<tr><td>${md(x.date)}</td><td>${x.bw}</td><td>${isNum(y.hangPct) ? y.hangPct.toFixed(0) + '%' : '—'}</td><td>${isNum(y.pullPct) ? y.pullPct.toFixed(0) + '%' : '—'}</td><td>${vTxt(y.v)}</td><td><button class="fr-del" data-act="bn-del" data-id="${x.id}" aria-label="삭제">${ic('close')}</button></td></tr>`; }).join('')}</tbody></table></div></section>` : ''}`;
 }
 
 // 주간 리포트에 넣을 자연 바위·체력 요약
 function reportExtra(mon) {
   const L = [], sun = addDays(mon, 6), st = state.settings;
-  if (isNum(st.bodyFat) || isNum(st.smm) || isNum(st.inbodyBmr)) L.push(`- 인바디${st.inbodyDate ? `(${st.inbodyDate})` : ''}: ${[isNum(st.bodyFat) ? `체지방률 ${st.bodyFat}%` : '', isNum(st.smm) ? `골격근량 ${st.smm}kg` : '', isNum(st.inbodyBmr) ? `기초대사량 ${st.inbodyBmr}kcal` : ''].filter(Boolean).join(' · ')}`);
+  if (isNum(st.bodyFat) || isNum(st.smm) || isNum(st.inbodyBmr)) {
+    const ibs = inbodies().filter(x => x.date <= sun).sort(byDateDesc), dl = ibs.length >= 2 ? inbodyDelta(ibs[0], ibs[1]) : '';
+    L.push(`- 인바디${st.inbodyDate ? `(${st.inbodyDate})` : ''}: ${[isNum(st.bodyFat) ? `체지방률 ${st.bodyFat}%` : '', isNum(st.smm) ? `골격근량 ${st.smm}kg` : '', isNum(st.inbodyBmr) ? `기초대사량 ${st.inbodyBmr}kcal` : ''].filter(Boolean).join(' · ')}${dl ? ` (직전 ${ibs[1].date} 대비 ${dl})` : ''}`);
+  }
   const wk = outs().filter(o => o.date >= mon && o.date <= sun);
   if (wk.length) L.push(`- 이번 주 자연 바위: ${wk.map(o => `${o.area || ''} ${o.name || ''} V${o.v} ${STYLE[o.style]}${isNum(o.tries) ? ` ${o.tries}번` : ''}`.trim()).join(' / ')}`);
   const sl = sendLevel(sun);
@@ -230,24 +311,42 @@ function idb() {
   return new Promise((res, rej) => { const r = indexedDB.open('bt-snap', 1); r.onupgradeneeded = () => r.result.createObjectStore('s'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 }
 const idbReq = (db, mode, fn) => new Promise((res, rej) => { const tx = db.transaction('s', mode), q = fn(tx.objectStore('s')); tx.oncomplete = () => res(q && q.result); tx.onerror = () => rej(tx.error); });
+// 'YYYY-MM-DD' = 그날 처음 연 상태 · 'YYYY-MM-DD-pre' = 불러오기·전체 지우기 직전 상태
+const snapLabel = k => (k.endsWith('-pre') ? `${md(k.slice(0, 10))} 변경 직전` : md(k));
 async function snapTake() {
+  let db;
   try {
     if (!Object.keys(state.days).length) return;
-    const db = await idb(), k = todayStr();
+    db = await idb();
+    const k = todayStr();
     const keys = await idbReq(db, 'readonly', s => s.getAllKeys());
     if (!keys.includes(k)) await idbReq(db, 'readwrite', s => s.put(JSON.stringify(state), k));
     const all = (await idbReq(db, 'readonly', s => s.getAllKeys())).sort();
-    for (const old of all.slice(0, Math.max(0, all.length - 14))) await idbReq(db, 'readwrite', s => s.delete(old));
-    ui.snaps = all.slice(-14).reverse();
+    for (const old of all.slice(0, Math.max(0, all.length - 16))) await idbReq(db, 'readwrite', s => s.delete(old));
+    ui.snaps = all.slice(-16).reverse();
   } catch (e) { ui.snaps = null; }
+  finally { if (db) db.close(); }
+}
+async function snapForce() {
+  let db;
+  try {
+    if (!Object.keys(state.days).length) return;
+    db = await idb();
+    await idbReq(db, 'readwrite', s => s.put(JSON.stringify(state), todayStr() + '-pre'));
+    ui.snaps = (await idbReq(db, 'readonly', s => s.getAllKeys())).sort().slice(-16).reverse();
+  } catch (e) { /* 저장 공간이 막혀도 진행 */ }
+  finally { if (db) db.close(); }
 }
 async function snapRestore(k) {
+  let db;
   try {
-    const db = await idb(), raw = await idbReq(db, 'readonly', s => s.get(k)), s = normalize(JSON.parse(raw));
+    db = await idb();
+    const raw = await idbReq(db, 'readonly', s => s.get(k)), s = normalize(JSON.parse(raw));
     if (!s) throw new Error('형식');
-    if (!confirm(`${k} 아침 상태(기록 ${Object.keys(s.days).length}일치)로 되돌립니다. 그 뒤에 적은 내용은 사라집니다. 계속할까요?`)) return;
-    state = s; applyTheme(); commit(); toast(`${md(k)} 상태로 되돌렸어요`);
+    if (!confirm(`${snapLabel(k)} 상태(기록 ${Object.keys(s.days).length}일치)로 되돌립니다. 그 뒤에 적은 내용은 사라집니다. 계속할까요?`)) return;
+    state = s; applyTheme(); commit(); toast(`${snapLabel(k)} 상태로 되돌렸어요`);
   } catch (e) { toast('스냅샷을 읽지 못했습니다'); }
+  finally { if (db) db.close(); }
 }
 async function askPersist() {
   try { if (navigator.storage && navigator.storage.persist) ui.persist = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch (e) { ui.persist = false; }
@@ -267,7 +366,7 @@ function protectBox() {
     <p class="hint">${p === true ? `${ic('check')}이 기기에 영구 저장이 허용되어 있습니다.` : p === false ? `${ic('alert')}브라우저가 영구 저장을 허용하지 않았습니다. 홈 화면에 추가해서 쓰면 허용될 가능성이 높고, 주 1회 백업을 꼭 하세요.` : '영구 저장 상태 확인 중…'}</p>
     <button class="btn wide" data-act="share-backup">${ic('share')}백업 파일 보내기 (카톡·드라이브 등)</button>
     <h3 class="h3">자동 스냅샷 <small class="muted">하루 한 번 · 최근 14일</small></h3>
-    ${sn && sn.length ? `<div class="chips">${sn.map(k => `<button class="chipbtn" data-act="snap-restore" data-k="${k}">${md(k)}</button>`).join('')}</div><p class="hint">누르면 그날 앱을 처음 열었을 때 상태로 되돌립니다. 같은 기기 안에 저장되므로 기기를 잃어버리면 함께 사라집니다.</p>` : '<p class="hint">아직 스냅샷이 없습니다. 기록이 생기면 매일 자동으로 만듭니다.</p>'}
+    ${sn && sn.length ? `<div class="chips">${sn.map(k => `<button class="chipbtn" data-act="snap-restore" data-k="${k}">${snapLabel(k)}</button>`).join('')}</div><p class="hint">누르면 그날 앱을 처음 열었을 때 상태로 되돌립니다. 같은 기기 안에 저장되므로 기기를 잃어버리면 함께 사라집니다.</p>` : '<p class="hint">아직 스냅샷이 없습니다. 기록이 생기면 매일 자동으로 만듭니다.</p>'}
   </div>`;
 }
 
@@ -334,14 +433,49 @@ document.addEventListener('click', e => {
     case 'track': state.settings.track = b.dataset.v; commit(); return toast(`${PLAN.tracks[b.dataset.v].name} 프로그램으로 맞췄어요`);
     case 'rec-view': ui.recView = b.dataset.v; window.scrollTo(0, 0); return render();
     case 'ou-style': ui.ouStyle = b.dataset.v; document.querySelectorAll('[data-act="ou-style"]').forEach(x => x.classList.toggle('on', x === b)); return;
+    case 'ou-fstyle': ui.ouFilterStyle = b.dataset.v; return render();
+    case 'ou-try': {
+      const o = outs().find(x => x.id === b.dataset.id); if (!o) return;
+      o.tries = (isNum(o.tries) ? o.tries : 0) + 1;
+      commit(); return toast(`${o.name || '프로젝트'} · 시도 ${o.tries}번`);
+    }
+    case 'ou-send': {
+      const o = outs().find(x => x.id === b.dataset.id); if (!o) return;
+      o.style = 'send'; o.date = todayStr();
+      commit(); return toast(`V${o.v} ${o.name || '문제'} 완등!`);
+    }
+    case 'ou-edit': {
+      const o = outs().find(x => x.id === b.dataset.id); if (!o) return;
+      ui.ouEditId = o.id; ui.ouArea = o.area || ''; ui.ouProb = o.name || NEW; ui.ouStyle = o.style;
+      render();
+      const el = document.getElementById('ouForm'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    case 'ou-edit-cancel': ui.ouEditId = null; return render();
     case 'ou-add': {
       const date = val('ouD') || todayStr(), v = +val('ouV');
       const area = (val('ouA') === NEW ? val('ouAnew') : val('ouA')).trim(), name = (val('ouN') === NEW ? val('ouNnew') : val('ouN')).trim();
       if (val('ouA') === NEW && !area) { toast('새 지역 이름을 넣어 주세요'); return; }
       ui.ouArea = area || ui.ouArea;
-      outs().push({ id: 'o' + Date.now().toString(36), date, v, area, name, tries: num('ouT'), style: ui.ouStyle || 'send', note: val('ouM').trim() });
-      commit(); return toast(`V${v} ${STYLE[ui.ouStyle || 'send']} 기록`);
+      const sty = ui.ouStyle || 'send', rec = { date, v, area, name, tries: num('ouT'), style: sty, note: val('ouM').trim() };
+      if (ui.ouEditId) {
+        const o = outs().find(x => x.id === ui.ouEditId);
+        if (o) Object.assign(o, rec);
+        ui.ouEditId = null;
+        commit(); return toast(`V${v} 기록을 고쳤어요`);
+      }
+      outs().push(Object.assign({ id: 'o' + Date.now().toString(36) }, rec));
+      commit(); return toast(`V${v} ${STYLE[sty]} 기록`);
     }
+    case 'ib-add': {
+      const st = state.settings;
+      if (!isNum(st.bodyFat) && !isNum(st.smm) && !isNum(st.inbodyBmr)) { toast('체지방률·골격근량·기초대사량 중 하나를 먼저 넣어 주세요'); return; }
+      const date = st.inbodyDate || todayStr();
+      inbodies().push({ id: 'ib' + Date.now().toString(36), date, bw: curWeight(date), bodyFat: st.bodyFat, smm: st.smm, bmr: st.inbodyBmr });
+      syncInbodySettings();
+      commit(); return toast('인바디 기록을 저장했어요');
+    }
+    case 'ib-del': if (confirm('이 인바디 기록을 지울까요?')) { state.inbody = inbodies().filter(x => x.id !== b.dataset.id); syncInbodySettings(); commit(); } return;
     case 'ou-imp': {
       const sel = val('ouA') === NEW ? val('ouAnew').trim() : val('ouA');
       const list = parseProblems(val('ouImp'), sel);
@@ -351,7 +485,7 @@ document.addEventListener('click', e => {
       commit(); return toast(`${r.add}개 추가${r.upd ? ` · ${r.upd}개 등급 수정` : ''}`);
     }
     case 'ou-imp-clear': if (confirm(`붙여넣은 문제 ${probs().length}개를 지울까요? 완등 기록은 그대로 남습니다.`)) { state.probs = []; commit(); } return;
-    case 'ou-del': if (confirm('이 기록을 지울까요?')) { state.outdoor = outs().filter(o => o.id !== b.dataset.id); commit(); } return;
+    case 'ou-del': if (confirm('이 기록을 지울까요?')) { if (ui.ouEditId === b.dataset.id) ui.ouEditId = null; state.outdoor = outs().filter(o => o.id !== b.dataset.id); commit(); } return;
     case 'bn-add': {
       const bw = num('bnW');
       if (!isNum(bw) || bw < 25) { toast('체중을 넣어 주세요'); return; }
@@ -374,7 +508,14 @@ function syncBack() { if (!backArmed && !isRootView()) { try { history.pushState
 function stepBack() {
   const scan = document.querySelector('.scan');
   if (scan) return scan.querySelector('[data-scan="close"]').click();
-  if (!document.getElementById('runner').hidden) { if (confirm('타이머를 끝낼까요?')) closeRunner(); return; }
+  if (!document.getElementById('runner').hidden) {
+    if (typeof RUN !== 'undefined' && RUN.done) { closeRunner(); return; }
+    const was = typeof RUN !== 'undefined' && RUN.on && !RUN.paused;
+    if (was) togglePause(); // 묻는 동안 멈춤
+    if (confirm('타이머를 끝낼까요?')) closeRunner();
+    else if (was) togglePause();
+    return;
+  }
   if (ui.guide) { ui.guide = null; return renderGuide(); }
   if (ui.sheet) return closeSheet(); // 담은 음식이 있으면 확인을 받음
   if (ui.focus != null) { ui.focus = null; document.body.classList.remove('lock'); return render(); }
@@ -387,7 +528,7 @@ if (!window.BT_TEST) {
   window.addEventListener('popstate', () => { backArmed = false; stepBack(); syncBack(); });
   window.addEventListener('DOMContentLoaded', () => {
     // 화면을 그리는 함수가 끝날 때마다 뒤로가기 표시를 맞춤
-    ['render', 'renderSheet', 'renderGuide', 'renderFocus'].forEach(n => {
+    ['render', 'renderSheet', 'renderGuide', 'renderFocus', 'startRun'].forEach(n => {
       const f = window[n];
       if (typeof f === 'function') window[n] = function (...a) { const r = f.apply(this, a); syncBack(); return r; };
     });

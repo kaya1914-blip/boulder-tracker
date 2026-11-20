@@ -15,13 +15,15 @@
   <h1>훈련·식단 엔진 검사</h1>
   <p id="sum"></p>
   <ul id="out"></ul>
-  <main id="main" hidden></main><div id="focus" hidden></div><div id="sheet" hidden></div><div id="toast"></div>
+  <main id="main" hidden></main><div id="focus" hidden></div><div id="sheet" hidden></div><div id="guide" hidden></div><div id="runner" hidden></div><div id="toast"></div>
   <script src="plan.js"></script>
   <script src="foods.js"></script>
   <script src="app.js"></script>
   <script src="engine.js"></script>
   <script src="pro.js"></script>
   <script src="food.js"></script>
+  <script src="guide.js"></script>
+  <script src="timer.js"></script>
   <script>
   // 규칙을 고친 뒤 이 페이지를 열어 모두 ✓인지 확인하세요. 실제 기록은 읽거나 쓰지 않습니다.
   const res = [];
@@ -137,6 +139,36 @@
   check('입문 + 밴드: 밴드 보조 풀업', /밴드 보조 풀업/.test(st('homeC', 'p')), st('homeC', 'p'));
   scene({});
   check('기구 설정 전: 기존대로 풀업, 행보드 단계 없음', /풀업/.test(st('homeC', 'p')) && !/로우/.test(st('homeC', 'p')) && !getSteps('homeC', '2026-11-17').some(x => x.id === 'h'), st('homeC', 'p'));
+
+  // 버그 수정·새 기능 확인
+  check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
+  const dz = parseIngredients('밥 1/0공기');
+  check('재료 계산: 1/0 같은 입력 방어', isFinite(dz.k) && dz.k > 0, dz.k);
+  scene({ '2026-11-16': { food: { b: [{ f: 'my_t', q: 2 }] } } });
+  state.foods = [{ id: 'my_t', n: '커스텀 프로틴빵', u: '1개', k: 220, p: 18, c: '내 음식', s: 0.5, mine: true }];
+  state.combos = [{ id: 'cb1', n: '아침세트', items: [{ f: 'my_t', q: 1 }] }];
+  inlineDeletedFood(state.foods[0]); state.foods = [];
+  const dd = foodTotals('2026-11-16'), dc = comboTotals(state.combos[0]);
+  check('내 음식 지워도 과거 기록·조합 칼로리 유지', dd.k === 440 && dd.p === 36 && dc.k === 220, JSON.stringify({ dd, dc }));
+  scene({});
+  state.tests = [{ id: 't1', date: '2026-10-01', bw: 62, hang: 10, pull: 15 }];
+  check('체력 측정 1건이어도 삭제 버튼', /data-act="bn-del"/.test(benchView()));
+  state.tests.push({ id: 't2', date: '2026-11-15', bw: 61, hang: 14, pull: 20 });
+  check('측정 2건 이상 → 근력 추이 그래프 + 직전 대비 증감', /bench-chart/.test(benchView()) && /bm-d pos/.test(benchView()));
+  scene({ '2026-11-16': { weight: 62 } });
+  state.inbody = [{ id: 'ib1', date: '2026-10-01', bw: 63, bodyFat: 19.0, smm: 28.5, bmr: 1540 }, { id: 'ib2', date: '2026-11-15', bw: 62, bodyFat: 17.8, smm: 29.0, bmr: 1565 }];
+  syncInbodySettings();
+  check('인바디 이력: 최신 값이 칼로리 계산·리포트 추세에 반영', state.settings.inbodyBmr === 1565 && autoTargets('2026-11-16').bmrVal === 1565 && reportExtra('2026-11-16').some(l => /직전 2026-10-01 대비/.test(l)));
+  scene({ '2026-11-16': { session: 'limit', checks: { w: true } } });
+  ui.focus = { date: '2026-11-16', i: 99 }; renderFocus();
+  check('세션 완료 화면에 운동 시간·RPE 입력', /f-load/.test(document.getElementById('focus').innerHTML) && /'rpe'|data-k="rpe"/.test(document.getElementById('focus').innerHTML));
+  ui.focus = null; renderFocus();
+  check('운동 방법 연결: 외회전·회내회외·집 C 행보드', guideKeys('homeA', 'er').length === 1 && guideKeys('homeA', 'pr').length === 1 && guideKeys('homeC', 'h')[0] === 'hangboard' && Object.values(STEP_GUIDE).flat().every(k => !!GUIDE[k]));
+  scene({}, { equip: { bar: false, db: [5] } });
+  check('철봉 없어 대체된 단계는 원래 운동 설명 숨김', guideKeys('homeA', 'll').length === 0 && guideKeys('homeA', 'pu').length === 1);
+  scene({});
+  state.outdoor = [{ id: 'o1', date: '2026-11-01', v: 7, area: '내원사', name: '테스트', tries: 3, style: 'project', note: '' }];
+  check('프로젝트는 완등 등급에 미반영 · 완등 버튼 표시', sendLevel('2026-11-16').outdoor == null && /data-act="ou-send"/.test(outdoorView()));
 
   const bad = res.filter(x => !x.ok).length;
   document.getElementById('sum').textContent = `${res.length - bad} / ${res.length} 통과`;

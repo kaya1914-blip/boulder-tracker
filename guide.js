@@ -32,12 +32,6 @@ const GUIDE = {
     cue: ['배꼽을 척추 쪽으로 당기기', '숨은 참지 말고 짧게 계속 쉬기'],
     avoid: ['엉덩이가 처지거나 너무 들리기', '목을 떨어뜨리기'],
   },
-  side_plank: {
-    t: '사이드 플랭크', aim: '옆구리 근육과 어깨 안정성을 기릅니다.',
-    how: ['옆으로 누워 팔꿈치를 어깨 아래에 둡니다', '골반을 들어 머리부터 발까지 일직선', '정해진 시간 버티고 반대쪽도 같은 시간'],
-    cue: ['위쪽 골반을 앞으로 말리지 않게', '바닥 어깨를 귀에서 멀리'],
-    avoid: ['골반이 처지기'],
-  },
   cooldown: {
     t: '정리 운동 · 폼롤러', aim: '굳은 근육을 풀고 다음 운동 회복을 돕습니다.',
     how: ['전완: 팔을 펴고 손가락을 반대 손으로 뒤로 젖혀 30초, 손등 쪽도 30초', '어깨: 팔을 가슴 앞으로 당겨 30초씩', '폼롤러: 등(날개뼈 사이)·광배·종아리를 천천히 1분씩 굴립니다', '호흡을 길게 내쉬며 마무리'],
@@ -109,8 +103,20 @@ const GUIDE = {
     cue: ['팔 높이보다 날개뼈를 등 뒤 주머니에 넣는다는 느낌', '들어 올리는 높이는 바닥에서 손 한 뼘이면 충분', '가장 힘든 Y를 덜 지쳤을 때 먼저 합니다'],
     avoid: ['고개를 들어 목 뒤에 힘주기', '허리를 젖혀 가슴까지 들기', '덤벨 들기 — 이 운동은 맨손으로도 충분합니다'],
   },
+  external_rotation: {
+    t: '옆으로 누워 외회전 (회전근개)', aim: '어깨 뒤쪽 회전근을 강화해 당기기 위주인 클라이머의 어깨 충돌·통증을 예방합니다.',
+    how: ['옆으로 누워 위쪽 팔의 팔꿈치를 90°로 굽히고 옆구리에 수건을 끼워 고정합니다', '가벼운 덤벨(1~2kg)을 쥐고 팔뚝을 천장 쪽으로 천천히 들어 올립니다', '맨 위에서 1초 멈춘 뒤 3초 동안 천천히 내립니다', '한쪽을 마치면 반대쪽도 같은 횟수로 합니다'],
+    cue: ['팔꿈치가 옆구리에서 떨어지지 않게', '어깨 뒤쪽이 뻐근하면 정상', '무게보다 천천히 내리는 3초에 집중'],
+    avoid: ['무거운 덤벨로 몸통을 젖히며 들기', '손목이 꺾인 채로 들기'],
+  },
+  wrist_pronation: {
+    t: '덤벨 회내·회외 (전완 돌리기)', aim: '전완을 안팎으로 돌리는 근육을 길러 팔꿈치 안쪽·바깥쪽 통증(골프·테니스 엘보)을 예방합니다.',
+    how: ['의자에 앉아 팔뚝을 허벅지 위에 올리고 손목이 무릎 밖으로 나오게 합니다', '가벼운 덤벨(1~2kg)의 한쪽 끝만 세워 쥡니다', '손바닥이 아래로 가게 2초 천천히 돌리고, 반대로 위로 가게 2초 돌립니다', '좌우 모두 정해진 횟수만큼 반복합니다'],
+    cue: ['팔꿈치 90° 유지 · 팔뚝이 뜨지 않게', '끝에서 반동 주지 않기'],
+    avoid: ['너무 무거운 무게', '팔꿈치에 날카로운 통증이 있을 때 억지로 하기'],
+  },
   reverse_curl: {
-    t: '리버스 리스트컬 (5kg, 한 손씩)', aim: '손목 펴는 근육을 길러, 쥐는 근육만 쓰는 클라이머의 팔꿈치 바깥쪽 통증(엘보)을 예방합니다.',
+    t: '리버스 리스트컬 (한 손씩)', aim: '손목 펴는 근육을 길러, 쥐는 근육만 쓰는 클라이머의 팔꿈치 바깥쪽 통증(엘보)을 예방합니다.',
     how: ['의자에 앉아 팔뚝을 허벅지 위에 올리고 손목이 무릎 밖으로 나오게 합니다', '손등이 위를 보게 5kg 덤벨을 한 손으로 쥡니다', '손목만 써서 덤벨을 2초 동안 들어 올리고 1초 멈춥니다', '3초 동안 천천히 내립니다. 한쪽을 마치면 반대쪽'],
     cue: ['팔뚝은 허벅지에 붙인 채 손목 관절만 움직이기', '5kg가 무거우면 반대 손으로 올리기를 도와주고, 내리는 3초만 혼자 버티기'],
     avoid: ['팔꿈치·어깨로 들어 올리기', '아래로 툭 떨어뜨리기', '팔꿈치 바깥쪽이 찌릿하면 횟수 줄이기'],
@@ -245,13 +251,15 @@ const STEP_GUIDE = {
   'limit:w': 'warmup_boulder', 'limit:m': 'limit_boulder', 'limit:c': ['hanging_leg_raise', 'plank'], 'limit:x': 'cooldown',
   'strength:w': 'warmup_boulder', 'strength:h': 'hangboard', 'strength:cp': 'campus', 'limit:tq': 'tech_drill', 'volume:tq': 'tech_drill', 'strength:p': 'pullup', 'strength:l': 'lockoff', 'strength:e': 'easy_climb', 'strength:x': 'cooldown',
   'volume:w': 'warmup_boulder', 'volume:b': 'volume_brown', 'volume:n': 'endurance', 'volume:x': 'cooldown',
-  'homeA:w': 'push_warmup', 'homeA:pu': 'pushup', 'homeA:pk': 'pike_pushup', 'homeA:yt': 'ytw_raise', 'homeA:rc': 'reverse_curl', 'homeA:ts': 'shoulder_tap', 'homeA:ll': 'hanging_leg_raise', 'homeA:x': 'push_cooldown',
+  'homeA:w': 'push_warmup', 'homeA:pu': 'pushup', 'homeA:pk': 'pike_pushup', 'homeA:yt': 'ytw_raise', 'homeA:er': 'external_rotation', 'homeA:rc': 'reverse_curl', 'homeA:pr': 'wrist_pronation', 'homeA:ts': 'shoulder_tap', 'homeA:ll': 'hanging_leg_raise', 'homeA:x': 'push_cooldown',
   'homeB:w': 'mobility_warmup', 'homeB:gs': 'goblet_squat', 'homeB:rd': 'sl_rdl', 'homeB:db': 'dead_bug', 'homeB:sp': 'side_plank', 'homeB:hh': 'hollow_hold', 'homeB:st': 'hip_stretch', 'homeB:dh': 'dead_hang', 'homeB:x': 'thoracic_stretch',
-  'homeC:w': 'pull_warmup', 'homeC:p': 'pullup', 'homeC:l': 'lockoff', 'homeC:ng': 'negative_pullup', 'homeC:po': 'pullover', 'homeC:sc': 'scap_pullup', 'homeC:ll': 'hanging_leg_raise', 'homeC:x': 'pull_cooldown',
+  'homeC:w': 'pull_warmup', 'homeC:h': 'hangboard', 'homeC:p': 'pullup', 'homeC:l': 'lockoff', 'homeC:ng': 'negative_pullup', 'homeC:po': 'pullover', 'homeC:sc': 'scap_pullup', 'homeC:ll': 'hanging_leg_raise', 'homeC:x': 'pull_cooldown',
   'rest:r': 'rest_day',
   '*:hc': 'hangboard',
 };
 function guideKeys(sid, stepId) {
+  const ea = PLAN.equipAlt[sid + ':' + stepId];
+  if (ea && !equip()[ea.need]) return []; // 기구가 없어 대체 운동으로 바뀐 단계는 원래 운동 설명을 보여주지 않음
   const g = STEP_GUIDE[sid + ':' + stepId] || STEP_GUIDE['*:' + stepId];
   return g ? [].concat(g) : [];
 }
