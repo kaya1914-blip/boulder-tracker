@@ -13,6 +13,8 @@ function T() {
   ['sound', 'voice', 'vibrate', 'flash'].forEach(k => { if (t[k] === undefined) t[k] = true; });
   if (!t.vol) t.vol = 'loud';
   if (!t.endAlert) t.endAlert = 'repeat';
+  if (!t.voiceMode) t.voiceMode = 'clip';      // 'clip' 고품질 녹음 음성 · 'device' 폰 음성
+  if (!isNum(t.voiceRate)) t.voiceRate = 1.1;   // 폰 음성 말 속도
   fixGrips(t.hang);
   return t;
 }
@@ -60,7 +62,8 @@ const SPOKEN = {
   '왼다리 뻗기': '왼다리', '오른다리 뻗기': '오른다리',
 };
 const spoken = l => SPOKEN[l] || l;
-const SPEAK_LEAD = 180; // 말은 실제로 나오기까지 0.1~0.3초 걸려서 그만큼 일찍 시작 (박자에 딱 맞게)
+// 폰 음성은 실제로 나오기까지 0.1~0.3초 걸려서 그만큼 일찍 시작 (박자에 딱 맞게). 녹음 음성은 거의 바로 나옴
+const speakLead = () => (typeof clipActive === 'function' && clipActive() ? 25 : 180);
 function tempoCue(p, k) {
   if (!p || p.t !== 'work') return '';
   if (k > 0) return countWord(k + 1);
@@ -119,10 +122,13 @@ function makeChimeUrl() {
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
 function unlockAudio() {
+  // 아이폰(사파리 17+): 소리를 '미디어 재생'으로 → 무음 스위치를 켜도 음성·알림음이 나옴
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) { /* 미지원 */ }
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
     if (actx.state !== 'running') actx.resume();
   } catch (e) { actx = null; }
+  if (typeof prepareVoice === 'function') prepareVoice();
   try {
     if (!chimeEl) { chimeEl = new Audio(makeChimeUrl()); chimeEl.preload = 'auto'; }
     // 사용자가 누른 순간에 한 번 무음으로 재생해 두면, 이후 자동 재생이 허용됩니다
@@ -147,20 +153,19 @@ function beep(freq, dur, vol = 0.25, again) {
   } catch (e) { /* 소리 미지원 */ }
 }
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-let koVoice = null;
 const utterKeep = [];
-function pickVoice() {
-  try { const vs = speechSynthesis.getVoices().filter(v => /^ko/i.test(v.lang)); koVoice = vs.find(v => v.localService) || vs[0] || null; } catch (e) { koVoice = null; }
-}
-if ('speechSynthesis' in window) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) { /* 미지원 */ } }
+// 말하기: 고품질 녹음 음성으로 할 수 있으면 그걸로(voice.js), 아니면 폰 음성
 function say(text, opt = {}) {
-  if (!text || !T().voice || !('speechSynthesis' in window)) return;
+  if (!text || !T().voice) return;
+  if (typeof clipSay === 'function' && clipSay(text)) return;
+  if (!('speechSynthesis' in window)) return;
   try {
     // 말하는 중일 때만 끊음. 매번 cancel하면 아이폰에서 말이 빠지거나 늦어지고 화면이 끊김
     if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ko-KR'; if (koVoice) u.voice = koVoice;
-    u.rate = opt.rate || 1.1;
+    const dv = typeof deviceVoice === 'function' ? deviceVoice() : null;
+    u.lang = 'ko-KR'; if (dv) u.voice = dv;
+    u.rate = Math.min(1.6, (opt.rate || 1.1) * (T().voiceRate || 1.1) / 1.1); // 숫자 세기는 조금 빠르게, 나머지는 설정 속도
     utterKeep.push(u); if (utterKeep.length > 6) utterKeep.shift(); // 사파리가 말하는 도중 객체를 지워 끊기는 문제 방지
     speechSynthesis.speak(u);
   } catch (e) { /* 음성 미지원 */ }
@@ -304,9 +309,9 @@ function beginPhase(at) {
   if (prev && (prev.t === 'rest' || prev.t === 'setrest') && p.t === 'work' && prev.d >= 20) { endAlarm(T().endAlert === 'repeat' ? 2 : 1); }
   else if (RUN.i > 0) flashScreen();
   if (p.t === 'work') { beep(1046, 0.4, 0.35); buzz(250); say(c.kind === 'hang' ? '매달려' : RUN.chain && c.workLabel ? c.workLabel + ' 시작' : '시작'); }
-  else if (p.t === 'rest' && c.chainRest) { beep(587, 0.3); buzz([80, 60, 80]); say(`잘했어요. 휴식 ${durText(p.d)}. 다음은 ${c.nextName || c.next}`); }
+  else if (p.t === 'rest' && c.chainRest) { beep(587, 0.3); buzz([80, 60, 80]); say(`잘했어요. 휴식 ${durSpeak(p.d)}. 다음은 ${speakName(c.nextName || c.next)}`); }
   else if (p.t === 'rest') { beep(587, 0.3); buzz([80, 60, 80]); if (p.d >= 5 || c.kind === 'rest') say('휴식'); }
-  else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${c.kind === 'hang' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`); }
+  else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${c.kind === 'hang' ? '세트' : '라운드'} 휴식 ${durSpeak(p.d)}`); }
   else if (p.t === 'prep') say('준비');
 }
 function tempoSignal(p, prev, c) {
@@ -319,7 +324,7 @@ function tempoSignal(p, prev, c) {
     else beep(/정지/.test(p.lab) ? 660 : 880, 0.1, 0.25);
     if (p.rep === c.reps && p.seg === c.tempo.length - 1) flashScreen();
   } else if (p.t === 'rest') { beep(587, 0.25); buzz([80, 60, 80]); say(p.note || '전환'); }
-  else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${p.set}세트 끝. 휴식 ${durText(p.d)}`); }
+  else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${p.set}세트 끝. 휴식 ${durSpeak(p.d)}`); }
   else if (p.t === 'prep') say(`준비. ${c.tempo.map(([l, d]) => `${l} ${d}초`).join(', ')}`);
 }
 function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
@@ -352,9 +357,9 @@ function tickCore() {
   const sec = Math.ceil(rem / 1000);
   // 템포 음성: 이 구간의 2초째부터 "둘, 셋" · 다음 구간 첫마디는 조금 일찍
   if (RUN.cfg.kind === 'tempo' && !RUN.paused && T().voice) {
-    if (p.t === 'work') { const k = Math.floor((p.d * 1000 - rem + SPEAK_LEAD) / 1000); if (k >= 1 && k < p.d) cueOnce(RUN.i, k); }
+    if (p.t === 'work') { const k = Math.floor((p.d * 1000 - rem + speakLead()) / 1000); if (k >= 1 && k < p.d) cueOnce(RUN.i, k); }
     const nx = RUN.phases[RUN.i + 1];
-    if (nx && nx.t === 'work' && rem <= SPEAK_LEAD) cueOnce(RUN.i + 1, 0);
+    if (nx && nx.t === 'work' && rem <= speakLead()) cueOnce(RUN.i + 1, 0);
   }
   if (sec !== RUN.lastSec) {
     RUN.lastSec = sec;
@@ -456,7 +461,7 @@ function chainAdvance() {
     const st = steps[ch.i], nc = stepRunCfg(d, st, true);
     if (!nc) { // 타이머로 할 수 없는 단계: 화면에 띄우고 멈춤
       closeRunner(); ui.focus = { date: d, i: ch.i }; renderFocus();
-      chime(); say(`다음은 ${st.name || st.t}. 직접 하고 완료를 누르세요`);
+      chime(); say(`다음은 ${speakName(st.name || st.t)}. 직접 하고 완료를 누르세요`);
       return;
     }
     chime();
@@ -529,7 +534,7 @@ function closeRunner() {
   else if (RUN.chain && RUN.from) { const d = RUN.chain.date; ui.focus = { date: d, i: RUN.chain.i }; }
   RUN = { on: false };
   releaseAwake();
-  try { speechSynthesis.cancel(); } catch (e) { /* 무시 */ }
+  try { speechSynthesis.cancel(); } catch (e) { /* 무시 */ } if (typeof stopClips === 'function') stopClips();
   const el = document.getElementById('runner');
   el.hidden = true; el.innerHTML = '';
   if (ui.focus == null) document.body.classList.remove('lock');
@@ -590,6 +595,7 @@ function viewTimer() {
   return appbar('<span class="eb-tag">TIMER</span> 행보드 · 휴식 · 인터벌', '타이머', null) + seg + body +
     `<section class="card"><div class="card-h"><h2>알림</h2><button class="sa-btn" data-act="t-test">${ic('play', 'fill')}알림 테스트</button></div>
       <div class="chips">${opt('sound', '소리')}${opt('voice', '음성 안내')}${opt('vibrate', '진동')}${opt('flash', '화면 깜빡임')}</div>
+      ${t.voice ? voiceSettings() : ''}
       <h3 class="h3">소리 크기</h3>${seg2('vol', [['normal', '보통'], ['loud', '크게']])}
       <h3 class="h3">끝날 때 알림</h3>${seg2('endAlert', [['once', '한 번'], ['repeat', '여러 번 반복']])}
       <p class="hint">휴식이 끝나 다시 운동할 때와 타이머가 완전히 끝날 때 크게 알려줍니다. 휴식 10초 전에는 음성으로 미리 알려줍니다.${!ios ? ' <b>갤럭시:</b> 알림음은 <b>미디어 음량</b>으로 나옵니다. 볼륨 버튼을 누른 뒤 미디어 음량을 올려두세요.' : ''}${ios ? ' <b>아이폰:</b> 옆의 무음 스위치가 켜져 있으면 소리가 나지 않고, 진동은 브라우저에서 지원되지 않습니다. 무음을 끄고 화면 깜빡임을 켜 두세요.' : ''}</p></section>`;
@@ -628,9 +634,17 @@ document.addEventListener('click', e => {
     case 't-gripall': t.hang.grips = t.hang.grips.map(() => t.hang.grips[0]); return commit();
     case 't-restadj': t.rest = Math.max(15, Math.min(900, t.rest + +b.dataset.delta)); return commit();
     case 't-opt': t[b.dataset.k] = !t[b.dataset.k]; return commit();
-    case 't-set': t[b.dataset.k] = b.dataset.v; save(); render(); unlockAudio(); if (b.dataset.k === 'vol') chime(); return;
+    case 't-set': {
+      const k = b.dataset.k;
+      t[k] = k === 'voiceRate' ? +b.dataset.v : b.dataset.v;
+      save(); render(); unlockAudio();
+      if (k === 'vol') chime();
+      if (k === 'voiceMode' || k === 'clipVoice' || k === 'voiceRate') voiceTest();
+      return;
+    }
+    case 't-vtest': return voiceTest();
     case 't-test': unlockAudio(); chime(); buzz([400, 150, 400, 150, 600]); say('휴식 끝. 다시 시작하세요'); toast('소리가 안 들리면 폰의 미디어 음량을 올려주세요'); return;
-    case 'r-alarm-stop': stopAlarm(); try { speechSynthesis.cancel(); } catch (err) { /* 무시 */ } b.remove(); return;
+    case 'r-alarm-stop': stopAlarm(); try { speechSynthesis.cancel(); } catch (err) { /* 무시 */ } if (typeof stopClips === 'function') stopClips(); b.remove(); return;
     case 't-start': {
       const c = t.mode === 'hang' ? Object.assign({ kind: 'hang' }, t.hang) : Object.assign({ kind: 'interval', title: '인터벌' }, t.interval);
       return startRun(c);
@@ -660,6 +674,7 @@ document.addEventListener('change', e => {
   const f = e.target.dataset && e.target.dataset.field;
   if (!f || !f.startsWith('t:')) return;
   const t = T();
+  if (f === 't:voice') { t.deviceVoice = e.target.value; save(); return voiceTest(); }
   if (f === 't:load') t.hang.load = e.target.value.trim();
   else if (f.startsWith('t:grip:')) t.hang.grips[+f.split(':')[2]] = e.target.value;
   commit();

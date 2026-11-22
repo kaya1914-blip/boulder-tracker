@@ -24,6 +24,7 @@
   <script src="food.js"></script>
   <script src="guide.js"></script>
   <script src="timer.js"></script>
+  <script src="voice.js"></script>
   <script>
   // 규칙을 고친 뒤 이 페이지를 열어 모두 ✓인지 확인하세요. 실제 기록은 읽거나 쓰지 않습니다.
   const res = [];
@@ -219,6 +220,37 @@
   scene({}, { level: 0 });
   check('영상: 입문은 무릎 푸시업으로 검색', videoQuery('homeA', getSteps('homeA', '2026-11-17').find(x => x.id === 'pu')) === '무릎 푸시업 자세');
   check('모든 운동 가이드에 영상 검색어', Object.keys(GUIDE).every(k => GUIDE_YT[k]), Object.keys(GUIDE).filter(k => !GUIDE_YT[k]).join(','));
+
+  // 고품질 녹음 음성: 앱이 하는 모든 말이 녹음 조각으로 조립되는지 (레벨 0~10 · 기구 조합 · 집 A/B/C)
+  {
+    const fakeV = { clips: Object.fromEntries(voiceVocab().map(k => [k, [0, 0.1]])) }, said = new Set();
+    const fixed = ['준비', '시작', '매달려', '휴식', '10초 남았어요', '절반', '일시정지', '셋', '반대쪽', '전환', '완료. 수고했어요', '휴식 끝. 다시 시작하세요', '세션 완료. 수고했어요', `세트 휴식 ${durSpeak(150)}`, `라운드 휴식 ${durSpeak(240)}`];
+    fixed.forEach(t => said.add(t));
+    [{ bar: true, hangboard: true, band: true, db: [1, 2, 5] }, { bar: false, db: [5] }].forEach(eq => {
+      for (let lv = 0; lv <= 10; lv++) {
+        scene({ '2026-11-17': { session: 'homeA' } }, { level: lv, equip: eq });
+        ['homeA', 'homeB', 'homeC'].forEach(sid => {
+          const steps = getSteps(sid, '2026-11-17');
+          steps.forEach(st => {
+            said.add(`잘했어요. 휴식 ${durSpeak(st.rest ? Math.min(180, Math.max(30, st.rest)) : 20)}. 다음은 ${speakName(st.name || st.t.replace(/\s*\d+(?:~\d+)?\s*분.*$/, ''))}`);
+            const c = stepRunCfg('2026-11-17', st, true);
+            if (!c) return;
+            if (c.workLabel) said.add(c.workLabel + ' 시작');
+            if (c.kind !== 'tempo') return;
+            said.add(`준비. ${c.tempo.map(([l, d]) => `${l} ${d}초`).join(', ')}`);
+            buildPhases(c).forEach(p => {
+              if (p.t === 'work') for (let k = 0; k < p.d; k++) said.add(tempoCue(p, k));
+              else if (p.t === 'rest') said.add(p.note || '전환');
+              else if (p.t === 'setrest') said.add(`${p.set}세트 끝. 휴식 ${durSpeak(p.d)}`);
+            });
+          });
+        });
+      }
+    });
+    const miss = [...said].filter(t => !clipTokens(t, fakeV));
+    check('녹음 음성: 집 운동에서 하는 모든 말이 녹음 조각으로 조립됨', !miss.length, `${said.size}개 문장 · 빠진 것: ${miss.slice(0, 8).join(' / ')}`);
+    check('녹음 음성: "1회"가 "10회" 앞부분으로 잘못 맞지 않음', JSON.stringify(clipTokens('10회 내려', fakeV).map(x => x.key)) === '["10회","내려"]' && durSpeak(90) === '1분 30초');
+  }
 
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
