@@ -185,6 +185,8 @@ function fill(str) {
 // ---------- 몸·목표·식단 목표 ----------
 const GOALS = { cut: '감량', keep: '유지', gain: '증량' };
 const goalOf = () => (GOALS[state.settings.goal] ? state.settings.goal : 'keep');
+// 힘이 모자랄 때 암장 날 더 먹는 방법 (설정의 '암장 가기 전 식사'에 따라)
+const fuelTip = () => PLAN.meals.fuelTip[state.settings.preMeal === 'no' ? 'after' : 'pre'];
 // 체중 목표가 있는지 (유지가 아니고 시작·목표 체중이 모두 있을 때)
 const weightGoal = () => goalOf() !== 'keep' && isNum(state.settings.startWeight) && isNum(state.settings.targetWeight) && state.settings.startWeight !== state.settings.targetWeight;
 const profileSet = () => { const s = state.settings; return !!(s.sex && isNum(s.age) && isNum(s.heightCm) && isNum(s.startWeight)); };
@@ -447,21 +449,21 @@ function verdict(mon) {
     } else if (goal === 'keep') {
       if (Math.abs(diff) > st.fastLossKg) {
         if (diff < 0) flags.fast = true;
-        cards.push({ lv: 'warn', icon: 'scale', t: diff < 0 ? '체중이 빠지는 중' : '체중이 느는 중', b: `${line}. 유지가 목표라 ${diff < 0 ? '다음 주 암장 날 운동 중 마실 것(우유·두유)을 더합니다.' : '간식·야식을 줄입니다.'}` });
+        cards.push({ lv: 'warn', icon: 'scale', t: diff < 0 ? '체중이 빠지는 중' : '체중이 느는 중', b: `${line}. 유지가 목표라 ${diff < 0 ? '다음 주 암장 날 ' + fuelTip() : '간식·야식을 줄입니다.'}` });
       } else cards.push({ lv: 'ok', icon: 'scale', t: '체중 유지 중', b: `${line}. 계획대로 진행합니다.` });
     } else if (diff > -st.plateauKg) {
       flags.plateau = true;
       cards.push({ lv: 'warn', icon: 'scale', t: '체중 정체', b: `${line}. 다음 주 쉬는 날은 끼니마다 밥 0.5공기를 더 줄입니다.` });
     } else if (-diff > st.fastLossKg) {
       flags.fast = true;
-      cards.push({ lv: 'warn', icon: 'scale', t: '감량이 너무 빠름', b: `${line}. 다음 주 암장 날은 점심 밥을 남기지 말고, 운동 중 바나나우유·초코우유 1팩을 더합니다.` });
+      cards.push({ lv: 'warn', icon: 'scale', t: '감량이 너무 빠름', b: `${line}. 다음 주 암장 날 ${fuelTip()}` });
     } else {
       cards.push({ lv: 'ok', icon: 'scale', t: '체중 순조', b: `${line}. 계획대로 진행합니다.` });
     }
   }
   if (s.weak) {
     flags.fast = true;
-    cards.push({ lv: 'warn', icon: 'battery', t: `암장에서 힘 떨어짐 ${s.weak}회`, b: '다음 주 암장 날은 점심 밥을 남기지 말고, 운동 중 바나나우유·초코우유 1팩을 더합니다. 운동 전 간식은 못 먹어도 괜찮습니다.' });
+    cards.push({ lv: 'warn', icon: 'battery', t: `암장에서 힘 떨어짐 ${s.weak}회`, b: `다음 주 암장 날 ${fuelTip()}` });
   }
   if (s.finger) {
     flags.finger = true;
@@ -503,7 +505,7 @@ function verdict(mon) {
         cards.push({ lv: 'warn', icon: 'alert', t: `단백질 부족 · 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g`, b: `목표의 ${Math.round(pp * 100)}%입니다. 한 번에 다 채우려 하지 말고 다음 주는 ${flags.proteinStep}g부터 갑니다. 아침 계란 2개(+12g)와 운동 직후 단백질 음료나 두유(+7~20g)만 지켜도 하루 20~30g이 늘어납니다.${note}` });
       }
       const kp = dt.nGym ? dt.kGym / tg.gym : null;
-      if (isNum(kp) && kp < 0.85) cards.push({ lv: 'warn', icon: 'bolt', t: `암장 날 칼로리 부족 · 평균 ${Math.round(dt.kGym).toLocaleString()} / ${tg.gym.toLocaleString()}kcal`, b: `목표의 ${Math.round(kp * 100)}%입니다. 운동하는 날 너무 적게 먹으면 회복이 늦고 다음 세션 힘이 떨어집니다. 운동 전 간식은 어려우면 생략하고, 점심 밥 남기지 않기 · 운동 중 스포츠음료나 두유 · 운동 직후 단백질 음료부터 챙기세요.${note}` });
+      if (isNum(kp) && kp < 0.85) cards.push({ lv: 'warn', icon: 'bolt', t: `암장 날 칼로리 부족 · 평균 ${Math.round(dt.kGym).toLocaleString()} / ${tg.gym.toLocaleString()}kcal`, b: `목표의 ${Math.round(kp * 100)}%입니다. 운동하는 날 너무 적게 먹으면 회복이 늦고 다음 세션 힘이 떨어집니다. ${st.preMeal === 'no' ? '점심 밥 남기지 않기 · 운동 중 스포츠음료나 두유 · 운동 직후 단백질 음료부터 챙기세요.' : '운동 전후 간식(바나나·단백질 음료)부터 챙기세요.'}${note}` });
       if (pp >= warnAt && !(isNum(kp) && kp < 0.85)) cards.push({ lv: 'ok', icon: 'check', t: '식단 순조', b: `단백질 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g${isNum(kp) ? ` · 암장 날 ${Math.round(dt.kGym).toLocaleString()}kcal` : ''}.${note}` });
     }
   }
@@ -1138,6 +1140,8 @@ function viewSettings() {
         ${num('kcalGym', '암장 날 칼로리', 50, `자동 ${a.gym}`)}${num('kcalRest', '쉬는 날 칼로리', 50, `자동 ${a.rest}`)}
         ${num('protein', '단백질 (g/일)', 5, `자동 ${a.protein}`)}
       </div>
+      <div class="field"><span>암장 가기 전 식사</span>${seg('preMeal', [['yes', '먹을 수 있음'], ['no', '어려움 (퇴근 후 바로)']])}</div>
+      <p class="hint">${st.preMeal === 'no' ? '운동 전 간식 칸 없이 점심을 든든히, 운동 중 마시는 것(스포츠음료·두유), 운동 직후 단백질 음료로 추천합니다.' : '운동 1~1.5시간 전 계란, 30분 전 바나나처럼 운동 전 간식을 넣어 추천합니다. 퇴근 후 바로 가서 못 먹는다면 "어려움"을 고르세요.'} 이 설정은 이 기기(나)에만 적용됩니다.</p>
       <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? `기초대사량 ${a.bmrVal}kcal(${{ inbody: '인바디 측정값', fat: '인바디 체지방률 · 제지방량 기준', mifflin: '성별·나이·키·최근 7일 체중' }[a.src]}) × 활동량` + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>
     </section>
     ${cafeCard()}
@@ -1159,7 +1163,7 @@ function viewSettings() {
     </section>
     <section class="card"><div class="card-h"><h2>자동 조정 규칙</h2></div><ul class="plain rules">
       ${goalOf() === 'gain' ? `<li>주 평균 체중이 ${st.plateauKg}kg 미만으로 늘면 → 다음 주 끼니마다 밥 0.5공기 추가</li>` : goalOf() === 'cut' ? `<li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 0.5공기 감소</li>` : `<li>주 평균 체중이 ${st.fastLossKg}kg 넘게 변하면 알림</li>`}
-      <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 점심 밥 남기지 않기 + 운동 중 우유·두유 1팩</li>
+      <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 ${fuelTip().replace(/합니다\.$/, '함')}</li>
       <li>손가락 통증 조금 → 고강도만 쉬고 행보드 한 단계 낮춤 · 중간 이상 → 손가락 운동 쉬고 그 주 행보드 제외, 다음 주 한 단계 후퇴</li>
       <li>팔꿈치 통증 조금 → 풀업·록오프 1세트 줄임 · 중간 이상 → 7일간 제외</li>
       <li>아픔 조금 → 고강도만 쉬고 가볍게 · 중간 이상 → 휴식</li>

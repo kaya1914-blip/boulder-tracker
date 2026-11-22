@@ -162,12 +162,15 @@
   scene({});
   check('기구 설정 전: 기존대로 풀업, 행보드 단계 없음', /풀업/.test(st('homeC', 'p')) && !/로우/.test(st('homeC', 'p')) && !getSteps('homeC', '2026-11-17').some(x => x.id === 'h'), st('homeC', 'p'));
 
-  // 식단: 회사원 현실 반영 (운동 전 간식 없음 · 운동 중 마시는 것 · 단백질 목표 완화)
+  // 식단: 암장 날 끼니는 사람마다 설정 (기본 = 운동 전 간식 있음 · '어려움' = 운동 중 마시는 것)
   scene({ '2026-11-16': { weight: 64.7, session: 'volume' } }, { goal: 'cut', startWeight: 65.5, targetWeight: 63 });
-  const gs = slotsFor('2026-11-16').map(x => x.id);
-  check('암장 날 끼니: 운동 전 간식 칸 없음 · 운동 중 마시는 칸 있음', !gs.includes('e') && !gs.includes('n') && gs.includes('i'), gs.join(','));
+  let gs = slotsFor('2026-11-16').map(x => x.id);
+  check('기본 설정: 운동 전 간식 칸 그대로 (다른 사용자 영향 없음)', gs.includes('e') && gs.includes('n'), gs.join(','));
+  state.settings.preMeal = 'no';
+  gs = slotsFor('2026-11-16').map(x => x.id);
+  check('운동 전 식사 어려움: 운동 전 칸 없음 · 운동 중 마시는 칸 있음', !gs.includes('e') && !gs.includes('n') && gs.includes('i'), gs.join(','));
   check('단백질 목표: 64.7kg 감량 → 95g (1.5g/kg)', targets('2026-11-16').protein === 95, targets('2026-11-16').protein);
-  scene({ '2026-11-16': { session: 'volume', food: { e: [{ f: 'egg', q: 2 }] } } });
+  scene({ '2026-11-16': { session: 'volume', food: { e: [{ f: 'egg', q: 2 }] } } }, { preMeal: 'no' });
   check('예전 기록의 운동 전 칸은 기록이 있으면 그대로 보임', slotsFor('2026-11-16').some(x => x.id === 'e' && /운동 1~1.5시간 전/.test(x.t)));
   const lunch2 = { l: [{ f: 'sides', q: 1 }, { f: 'rice', q: 1 }] };
   scene({ '2026-11-09': { weight: 65, food: lunch2 }, '2026-11-10': { weight: 65, food: lunch2 }, '2026-11-11': { weight: 65, food: lunch2 } }, { goal: 'cut', startWeight: 65.5, targetWeight: 63 });

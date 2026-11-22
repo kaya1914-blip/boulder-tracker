@@ -33,11 +33,14 @@ function qtyText(q) {
 
 // ---------- 그날의 끼니 구성 ----------
 function isGymDay(date) { const s = S(sessOn(date)); return !!(s && s.gym); }
+// 암장 날 끼니 방식 (설정 · 사람마다): 운동 전에 못 먹으면 '퇴근 후' 구성
+const afterWork = () => state.settings.preMeal === 'no';
+const gymMealKey = () => (afterWork() ? 'gymAfterWork' : 'gym');
 function riceQty(date) {
   const gym = isGymDay(date), m = PLAN.meals, k = gym ? 'gym' : 'rest';
   let q = m.rice[k];
   // 내 목표 칼로리와 기준 칼로리의 차이를 밥 양으로 맞춤 (밥이 들어가는 끼니 2번에 나눠서, 0.5공기 단위)
-  const diff = targets(date)[k] - m.refKcal[k];
+  const diff = targets(date)[k] - m.refKcal[gym ? gymMealKey() : 'rest'];
   q += diff / 2 / m.riceKcal;
   if (verdict(addDays(mondayOf(date), -7)).flags.plateau) {
     if (goalOf() === 'gain') q += 0.5;
@@ -59,15 +62,16 @@ function slotsFor(date) {
   const sid = sessOn(date), s = S(sid), gym = isGymDay(date);
   const pf = verdict(addDays(mondayOf(date), -7)).flags;
   const dayTime = gym && day(date).time === 'day';
-  const list = PLAN.meals[gym ? 'gym' : 'rest']
+  const list = PLAN.meals[gym ? gymMealKey() : 'rest']
     .filter(m => !(m.longOnly && s.min < 120))
+    .filter(m => !(dayTime && m.id === 'e'))
     .map(m => {
       let sug = m.sug === 'DINNER' ? dinnerItems(dinnerDefault(date), date) : (m.sug || []).map(([f, q]) => (f === 'RICE' ? ['rice', riceQty(date)] : [f, q])).filter(([, q]) => q > 0);
       let t = m.t, tip = m.tip || '', cafe = false;
       if (m.id === 'd') tip = `오늘 추천 · ${PLAN.dinners[dinnerDefault(date)].n}`;
       if (dayTime && m.id === 'l') { sug = PLAN.meals.dayWorkoutLunch.slice(); t = '점심 (운동 2시간 전)'; tip = '또는 김밥 2줄'; }
       else if (m.id === 'l' && cafeToday(date)) { sug = cafeItems(date); t = '점심 · 회사 급식'; tip = '안 먹은 건 ✕, 더 먹은 건 +'; cafe = true; }
-      if (gym && pf.fast && m.id === 'i') sug = sug.concat([PLAN.meals.fastLossExtra]);
+      if (gym && pf.fast && m.id === (afterWork() ? 'i' : dayTime ? 'n' : 'e')) sug = sug.concat([PLAN.meals.fastLossExtra[afterWork() ? 'after' : 'pre']]);
       return { id: m.id, t, tip, sug, cafe };
     });
   // 예전 기록에만 있는 끼니 칸(운동 전 간식 등)은 기록이 있을 때만 그대로 보여 줌
@@ -200,8 +204,8 @@ function cafeCard() {
 function dietNotes(date) {
   const gym = isGymDay(date), pf = verdict(addDays(mondayOf(date), -7)).flags, notes = [];
   if (gym && day(date).time === 'day') notes.push('낮 운동: 점심을 운동 2시간 전에 든든하게 먹고, 운동 전 계란은 뺍니다.');
-  if (pf.protein) notes.push(`지난주 단백질 평균 ${pf.protein}g → 이번 주는 ${pf.proteinStep}g부터 (최종 목표 ${targets(date).protein}g) · 아침 계란 2개 + 운동 직후 단백질 음료·두유부터`);
-  if (gym && pf.fast) notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 중 바나나우유(또는 초코우유) 1팩 추가');
+  if (pf.protein) notes.push(`지난주 단백질 평균 ${pf.protein}g → 이번 주는 ${pf.proteinStep}g부터 (최종 목표 ${targets(date).protein}g) · 아침 계란 2개 + 운동 직후(쉬는 날은 오후) 단백질 음료·두유부터`);
+  if (gym && pf.fast) notes.push(`지난주 판정(과감량·힘 떨어짐) → ${afterWork() ? '운동 중 바나나우유(또는 초코우유) 1팩 추가' : '운동 전 식빵 1장 추가'}`);
   if (state.settings.cafeOn && dow(date) >= 1 && dow(date) <= 5 && !cafeToday(date)) notes.push('이 날 급식 메뉴가 아직 없습니다 · 설정 → 회사 급식에서 붙여넣으면 점심을 한 번에 기록합니다');
   if (pf.plateau && goalOf() === 'gain') notes.push('지난주 체중이 늘지 않음 → 오늘은 끼니마다 밥 0.5공기 늘린 양으로 추천합니다');
   else if (!gym && pf.plateau && goalOf() === 'cut') notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 0.5공기 줄인 양으로 추천합니다');
