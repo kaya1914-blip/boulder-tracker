@@ -846,3 +846,17 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .cf-h span { color: var(--ink-2); font-weight: 600; }
 .cafe-wk { margin-top: 8px; }
 .cafe-wk summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600; padding: 6px 0; }
+
+/* 운동 영상 · 이어서 하기 */
+.f-help { display: flex; flex-wrap: wrap; gap: 8px; align-self: flex-start; }
+.g-btn.vid .ic { color: var(--red); }
+.g-btn.vid:not(.wide) { text-decoration: none; }
+.g-btn.vid:not(.wide) span { display: none; }
+.g-btn.wide.vid { text-decoration: none; }
+.f-chain { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; border: 1px solid rgba(30, 127, 214, .35); background: rgba(30, 127, 214, .08); color: var(--blue); border-radius: 18px; padding: 14px 16px; margin-top: 10px; }
+.f-chain > .ic:first-child { width: 26px; height: 26px; }
+.f-chain span { flex: 1; display: flex; flex-direction: column; }
+.f-chain b { font-size: 16px; color: var(--ink); } .f-chain small { font-size: 13px; color: var(--muted); }
+.gd-vid { display: inline-flex; align-items: center; gap: 7px; margin: 6px 0 4px; font-size: 13.5px; font-weight: 700; color: var(--ink); text-decoration: none; border: 1px solid var(--line-2); border-radius: 999px; padding: 8px 13px; }
+.gd-vid .ic { width: 16px; height: 16px; color: var(--red); }
+.r-title .r-chain { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); margin-top: 2px; }

@@ -26,6 +26,17 @@ const GUIDE = {
     cue: ['골반을 말아 올린다는 느낌', '내릴 때 2~3초 천천히'],
     avoid: ['몸을 흔들어 반동으로 올리기', '허리를 뒤로 꺾기'],
   },
+  floor_leg_raise: {
+    t: '바닥 레그레이즈 · 리버스 크런치 · V업', aim: '매달리지 않고 아랫배 코어를 기릅니다. 집 A는 손가락 쉬는 날에 하므로 철봉 대신 바닥에서 합니다.',
+    how: ['바닥에 누워 손은 엉덩이 옆(또는 아래)에 둡니다', '허리를 바닥에 붙인 채 다리를 붙여 수직까지 올립니다', '1초 멈췄다가 3초 동안 천천히 내리고, 바닥에 닿기 직전에 다시 올립니다', '어려우면 무릎을 굽힌 리버스 크런치(골반을 말아 올리기), 쉬우면 팔·다리를 같이 드는 V업'],
+    cue: ['내릴 때 허리가 뜨기 직전까지만', '숨은 올릴 때 내쉬기'],
+    avoid: ['허리가 바닥에서 뜨며 꺾이기', '반동으로 다리를 던지기'],
+  },
+  lat_stretch: {
+    t: '차일드 포즈 광배 스트레칭', aim: '매달리지 않고 광배·어깨를 늘립니다. 손가락이 아픈 날 데드행 대신 합니다.',
+    how: ['무릎을 꿇고 엉덩이를 발뒤꿈치 쪽으로 앉습니다', '양손을 최대한 멀리 뻗어 바닥에 둡니다', '가슴을 바닥 쪽으로 누르며 40초', '양손을 한쪽으로 걸어가 옆구리까지 늘리고 반대쪽도'],
+    cue: ['숨을 길게 내쉴 때 더 내려가기'], avoid: ['어깨가 찌릿하면 범위를 줄이기'],
+  },
   plank: {
     t: '플랭크', aim: '몸통 전체를 단단하게 버티는 힘을 기릅니다.',
     how: ['팔꿈치를 어깨 바로 아래에 두고 엎드립니다', '발끝으로 몸을 들어 머리부터 발뒤꿈치까지 일직선', '배와 엉덩이에 힘을 주고 정해진 시간 버팁니다'],
@@ -231,6 +242,7 @@ const GUIDE_LV = {
   pike_pushup: ['파이크 홀드: ㅅ자로 엉덩이를 들고 바닥을 밀며 20초 버티기', '파이크 푸시업 5~6회, 작은 범위부터', '파이크 푸시업 6~8회', '발을 의자에 올려 6~8회', '발을 의자에 올려 4초 내리기 8~10회'],
   ytw_raise: ['Y·T·W 각 5회', '각 6회', '각 6회 · 2초 정지', '각 8회', '각 8회 · 3초 정지'],
   shoulder_tap: ['무릎 대고 좌우 8회', '좌우 10회', '좌우 10회', '발 모으고 좌우 12회', '발을 붙이고 좌우 15회'],
+  floor_leg_raise: ['리버스 크런치 8~10회', '리버스 크런치 12회', '바닥 레그레이즈 10~12회 (3초 내리기)', 'V업 10회', 'V업 12회 (4초 내리기)'],
   hanging_leg_raise: ['무릎 굽혀 올리기(니레이즈) 6~8회', '니레이즈 10회', '니레이즈로 시작해 다리 펴서 8~10회', '다리 펴서 10회', '토투바: 발끝을 철봉까지 8회'],
   goblet_squat: ['5kg · 바닥 1초 정지 10회', '5kg · 바닥 2초 정지 10회', '5kg · 바닥 2초 정지 10회', '불가리안 스플릿 스쿼트: 뒷발을 의자에 올리고 좌우 8회', '불가리안 스플릿 스쿼트 좌우 10회'],
   sl_rdl: ['맨손으로 좌우 6회, 벽 짚어도 OK', '5kg 좌우 8회', '5kg 좌우 8회', '5kg 좌우 8회', '5kg 좌우 10회'],
@@ -246,25 +258,82 @@ const GUIDE_LV = {
   scap_pullup: ['6회', '8회', '8회', '8회', '8회 · 한 팔씩 해 보기'],
 };
 
+// 영상: 유튜브 검색어 (특정 영상은 지워지거나 바뀔 수 있어 검색 결과로 연결)
+const GUIDE_YT = {
+  warmup_boulder: '볼더링 워밍업 루틴',
+  bighold_hang: '클라이밍 워밍업 매달리기',
+  limit_boulder: '볼더링 한계 문제 연습 방법',
+  hanging_leg_raise: '행잉 레그레이즈 자세',
+  floor_leg_raise: '라잉 레그레이즈 허리 안 아프게',
+  lat_stretch: '차일드 포즈 광배 스트레칭',
+  plank: '플랭크 정자세',
+  cooldown: '클라이밍 후 전완 스트레칭',
+  hangboard: '행보드 하프크림프 맥스행 방법',
+  pullup: '풀업 정자세',
+  lockoff: '클라이밍 록오프 훈련',
+  negative_pullup: '네거티브 풀업 방법',
+  easy_climb: '클라이밍 발 기술 조용한 발',
+  volume_brown: '볼더링 볼륨 훈련',
+  endurance: '볼더링 4x4 지구력 훈련',
+  push_warmup: '스캡 푸시업',
+  pushup: '푸시업 정자세',
+  pike_pushup: '파이크 푸시업 자세',
+  ytw_raise: '엎드려 YTW 레이즈',
+  external_rotation: '옆으로 누워 덤벨 외회전',
+  wrist_pronation: '덤벨 회내 회외 운동',
+  reverse_curl: '리버스 리스트컬 덤벨',
+  shoulder_tap: '플랭크 숄더탭 자세',
+  push_cooldown: '문틀 가슴 스트레칭',
+  mobility_warmup: '오픈북 스트레칭 고양이 소',
+  goblet_squat: '고블릿 스쿼트 자세',
+  sl_rdl: '싱글레그 루마니안 데드리프트 덤벨',
+  dead_bug: '데드버그 운동 자세',
+  side_plank: '사이드 플랭크 자세',
+  hollow_hold: '할로우 홀드 자세',
+  hip_stretch: '개구리 스트레칭 피전 스트레칭',
+  dead_hang: '데드행 효과 자세',
+  thoracic_stretch: '의자 흉추 신전 스트레칭',
+  pull_warmup: '스캐퓰러 풀업 워밍업',
+  pullover: '바닥 덤벨 풀오버',
+  scap_pullup: '스캐퓰러 풀업',
+  pull_cooldown: '광배 스트레칭 전완 스트레칭',
+  tech_drill: '클라이밍 기술 드릴 사일런트 피트',
+  campus: '캠퍼스보드 기초',
+  rest_day: '액티브 리커버리 스트레칭',
+};
+
 // 세션 단계 → 가이드 연결
 const STEP_GUIDE = {
   'limit:w': 'warmup_boulder', 'limit:m': 'limit_boulder', 'limit:c': ['hanging_leg_raise', 'plank'], 'limit:x': 'cooldown',
   'strength:w': 'warmup_boulder', 'strength:h': 'hangboard', 'strength:cp': 'campus', 'limit:tq': 'tech_drill', 'volume:tq': 'tech_drill', 'strength:p': 'pullup', 'strength:l': 'lockoff', 'strength:e': 'easy_climb', 'strength:x': 'cooldown',
   'volume:w': 'warmup_boulder', 'volume:b': 'volume_brown', 'volume:n': 'endurance', 'volume:x': 'cooldown',
-  'homeA:w': 'push_warmup', 'homeA:pu': 'pushup', 'homeA:pk': 'pike_pushup', 'homeA:yt': 'ytw_raise', 'homeA:er': 'external_rotation', 'homeA:rc': 'reverse_curl', 'homeA:pr': 'wrist_pronation', 'homeA:ts': 'shoulder_tap', 'homeA:ll': 'hanging_leg_raise', 'homeA:x': 'push_cooldown',
+  'homeA:w': 'push_warmup', 'homeA:pu': 'pushup', 'homeA:pk': 'pike_pushup', 'homeA:yt': 'ytw_raise', 'homeA:er': 'external_rotation', 'homeA:rc': 'reverse_curl', 'homeA:pr': 'wrist_pronation', 'homeA:ts': 'shoulder_tap', 'homeA:ll': 'floor_leg_raise', 'homeA:x': 'push_cooldown',
   'homeB:w': 'mobility_warmup', 'homeB:gs': 'goblet_squat', 'homeB:rd': 'sl_rdl', 'homeB:db': 'dead_bug', 'homeB:sp': 'side_plank', 'homeB:hh': 'hollow_hold', 'homeB:st': 'hip_stretch', 'homeB:dh': 'dead_hang', 'homeB:x': 'thoracic_stretch',
   'homeC:w': 'pull_warmup', 'homeC:h': 'hangboard', 'homeC:p': 'pullup', 'homeC:l': 'lockoff', 'homeC:ng': 'negative_pullup', 'homeC:po': 'pullover', 'homeC:sc': 'scap_pullup', 'homeC:ll': 'hanging_leg_raise', 'homeC:x': 'pull_cooldown',
   'rest:r': 'rest_day',
   '*:hc': 'hangboard',
 };
-function guideKeys(sid, stepId) {
+function guideKeys(sid, stepId, date) {
   const ea = PLAN.equipAlt[sid + ':' + stepId];
-  if (ea && !equip()[ea.need]) return []; // 기구가 없어 대체 운동으로 바뀐 단계는 원래 운동 설명을 보여주지 않음
+  if (ea && ea.painAlt && date && equip()[ea.need] && fingerSore(date)) return sid + ':' + stepId === 'homeB:dh' ? ['lat_stretch'] : [];
+  if (ea && !equip()[ea.need]) return sid + ':' + stepId === 'homeB:dh' ? ['lat_stretch'] : []; // 기구가 없어 대체 운동으로 바뀐 단계는 원래 운동 설명을 보여주지 않음
   const g = STEP_GUIDE[sid + ':' + stepId] || STEP_GUIDE['*:' + stepId];
   return g ? [].concat(g) : [];
 }
-function guideBtn(sid, stepId, cls = '') {
-  const keys = guideKeys(sid, stepId);
+// 유튜브 검색 주소 (폰에서는 유튜브 앱으로 열림)
+const ytUrl = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+// 운동 단계의 영상: 지금 내 레벨·기구로 바뀐 실제 운동 이름(무릎 푸시업, V업 등)으로 검색
+function videoQuery(sid, st) {
+  if (st && st.name) return st.name.replace(/\(.*?\)/g, '').replace(/좌우|맨손|\d+(\.\d+)?kg/g, '').replace(/\s+/g, ' ').trim() + ' 자세';
+  const k = guideKeys(sid, st && st.id)[0];
+  return k ? GUIDE_YT[k] || GUIDE[k].t : '';
+}
+function videoBtn(sid, st, cls = 'wide') {
+  const q = videoQuery(sid, st);
+  return q ? `<a class="g-btn vid ${cls}" href="${ytUrl(q)}" target="_blank" rel="noopener" aria-label="${esc(q)} 영상 보기">${ic('play', 'fill')}<span>영상</span></a>` : '';
+}
+function guideBtn(sid, stepId, cls = '', date) {
+  const keys = guideKeys(sid, stepId, date);
   if (!keys.length) return '';
   return `<button class="g-btn ${cls}" data-act="g-open" data-keys="${keys.join(',')}" aria-label="${esc(GUIDE[keys[0]].t)} 운동 방법">${ic('info')}${cls.includes('wide') ? '<span>운동 방법</span>' : ''}</button>`;
 }
@@ -283,6 +352,7 @@ function renderGuide() {
     <div class="sh-list gd-body">${list.map(k => { const g = GUIDE[k]; return `<article class="gd">
       <h3 class="gd-t">${esc(g.t)}</h3>
       <p class="gd-aim">${esc(fill(g.aim))}</p>
+      <a class="gd-vid" href="${ytUrl(GUIDE_YT[k] || g.t)}" target="_blank" rel="noopener">${ic('play', 'fill')}유튜브에서 "${esc(GUIDE_YT[k] || g.t)}" 영상 보기</a>
       ${lvSec(k)}
       ${sec('하는 방법', g.how, 'how')}
       ${sec('핵심 포인트', g.cue, 'cue')}

@@ -51,6 +51,29 @@ function buildTempo(c) {
 }
 const KCOUNT = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물'];
 const countWord = n => KCOUNT[n - 1] || String(n);
+// 템포 음성: 구간이 시작될 때 짧은 말("내려"), 그 구간의 2초째부터는 "둘, 셋"으로 초를 셈. 회차 시작에는 "3회"를 붙임.
+// 예) 푸시업 내리기 3초·정지 1초·올리기 1초 → "1회 내려 · 둘 · 셋 · 멈춤 · 올려 · 2회 내려 …"
+const SPOKEN = {
+  '내리기': '내려', '올리기': '올려', '올라가기': '올라가', '내려가기': '내려가', '일어서기': '일어나', '숙이기': '숙여', '들기': '들어',
+  '정지': '멈춤', '다시 올라가기': '다시 올라가', '돌아오기': '돌아와', '당기기': '당겨', '풀기': '풀어', '어깨 내리기': '어깨 내려',
+  '안쪽으로': '안쪽', '바깥으로': '바깥', '머리 위로': '위로', '엉덩이로': '아래로', '왼쪽 뻗기': '왼쪽', '오른쪽 뻗기': '오른쪽',
+  '왼다리 뻗기': '왼다리', '오른다리 뻗기': '오른다리',
+};
+const spoken = l => SPOKEN[l] || l;
+const SPEAK_LEAD = 180; // 말은 실제로 나오기까지 0.1~0.3초 걸려서 그만큼 일찍 시작 (박자에 딱 맞게)
+function tempoCue(p, k) {
+  if (!p || p.t !== 'work') return '';
+  if (k > 0) return countWord(k + 1);
+  const head = p.seg === 0 ? `${p.rep === 1 ? [p.part, p.side].filter(Boolean).join(' ') + ' ' : ''}${p.rep}회 ` : '';
+  return (head + spoken(p.lab)).trim();
+}
+// 같은 말을 두 번 하지 않게: 단계 번호:초
+function cueOnce(i, k) {
+  const key = i + ':' + k;
+  if (!RUN.cued || RUN.cued.has(key)) return;
+  RUN.cued.add(key);
+  say(tempoCue(RUN.phases[i], k), { rate: 1.25 });
+}
 
 function buildPhases(c) {
   const ph = [];
@@ -106,9 +129,10 @@ function unlockAudio() {
     if (!chimeEl.dataset.ok) { chimeEl.muted = true; const pr = chimeEl.play(); if (pr) pr.then(() => { if (chimeEl.muted) { chimeEl.pause(); chimeEl.currentTime = 0; chimeEl.muted = false; } chimeEl.dataset.ok = '1'; }).catch(() => { chimeEl.muted = false; }); }
   } catch (e) { chimeEl = null; }
 }
-function beep(freq, dur, vol = 0.25) {
+function beep(freq, dur, vol = 0.25, again) {
   if (!T().sound || !actx) return;
-  if (actx.state !== 'running') { try { actx.resume(); } catch (e) { /* 무시 */ } }
+  // 아이폰은 음성·전화·잠금 뒤 소리 엔진이 '중단됨'이 됨 → 멈춘 시계에 예약하면 소리가 밀려 한꺼번에 나므로 다시 켠 뒤 재생
+  if (actx.state !== 'running') { if (!again) actx.resume().then(() => beep(freq, dur, vol, true)).catch(() => {}); return; }
   try {
     const loud = T().vol === 'loud';
     if (loud) vol = Math.min(0.9, vol * 2.4);
@@ -122,12 +146,22 @@ function beep(freq, dur, vol = 0.25) {
     o.start(t0); o.stop(t0 + dur + 0.02);
   } catch (e) { /* 소리 미지원 */ }
 }
-function say(text) {
-  if (!T().voice || !('speechSynthesis' in window)) return;
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let koVoice = null;
+const utterKeep = [];
+function pickVoice() {
+  try { const vs = speechSynthesis.getVoices().filter(v => /^ko/i.test(v.lang)); koVoice = vs.find(v => v.localService) || vs[0] || null; } catch (e) { koVoice = null; }
+}
+if ('speechSynthesis' in window) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) { /* 미지원 */ } }
+function say(text, opt = {}) {
+  if (!text || !T().voice || !('speechSynthesis' in window)) return;
   try {
-    speechSynthesis.cancel();
+    // 말하는 중일 때만 끊음. 매번 cancel하면 아이폰에서 말이 빠지거나 늦어지고 화면이 끊김
+    if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ko-KR'; u.rate = 1.1;
+    u.lang = 'ko-KR'; if (koVoice) u.voice = koVoice;
+    u.rate = opt.rate || 1.1;
+    utterKeep.push(u); if (utterKeep.length > 6) utterKeep.shift(); // 사파리가 말하는 도중 객체를 지워 끊기는 문제 방지
     speechSynthesis.speak(u);
   } catch (e) { /* 음성 미지원 */ }
 }
@@ -179,7 +213,8 @@ function makeSilentUrl() {
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
 function bgStart() {
-  try { if (!keepEl) { keepEl = new Audio(makeSilentUrl()); keepEl.loop = true; } const pr = keepEl.play(); if (pr) pr.catch(() => {}); } catch (e) { /* 미지원 */ }
+  // 무음 반복 재생은 안드로이드에서만 (아이폰은 음성·알림음과 오디오 세션이 부딪혀 소리가 끊김)
+  if (!IOS) try { if (!keepEl) { keepEl = new Audio(makeSilentUrl()); keepEl.loop = true; } const pr = keepEl.play(); if (pr) pr.catch(() => {}); } catch (e) { /* 미지원 */ }
   clearInterval(bgTimer);
   bgTimer = setInterval(() => { if (document.hidden && RUN.on && !RUN.done) tickCore(); }, 500); // 화면이 꺼지면 rAF가 멈추므로
   if ('mediaSession' in navigator) {
@@ -230,12 +265,12 @@ async function notify(title, body) {
 
 // ---------- 실행기 ----------
 let RUN = { on: false };
-function startRun(cfg, from) {
+function startRun(cfg, from, chain) {
   stopAlarm(); // 이전 타이머의 알람·음성 정리
-  try { speechSynthesis.cancel(); } catch (e) { /* 미지원 */ }
+  if (!chain) try { speechSynthesis.cancel(); } catch (e) { /* 미지원 */ }
   unlockAudio();
   const c = JSON.parse(JSON.stringify(cfg));
-  RUN = { on: true, cfg: c, phases: buildPhases(c), i: 0, paused: false, remain: 0, end: 0, lastSec: null, from: from || null, work: [], done: false };
+  RUN = { on: true, cfg: c, phases: buildPhases(c), i: 0, paused: false, remain: 0, end: 0, lastSec: null, from: from || null, work: [], done: false, chain: chain || null, cued: new Set() };
   if (!RUN.phases.length) { RUN.on = false; return; }
   buildRunner();
   if (typeof syncBack === 'function') syncBack();
@@ -255,19 +290,21 @@ function beginPhase(at) {
   setText('rSet', single ? '' : `${p.set}/${c.sets}`);
   setText('rRep', single ? '' : `${p.rep}/${c.reps}`);
   const grip = c.kind === 'tempo' ? ([p.part, p.side].filter(Boolean).join(' · ') || c.title || '') : c.kind === 'hang' ? [c.grips[(p.t === 'setrest' ? p.set : p.set - 1)] || '', c.load].filter(Boolean).join(' · ') : (c.title || '');
-  setText('rGrip', p.t === 'setrest' && c.kind === 'hang' ? '다음 세트 · ' + grip : grip);
+  setText('rGrip', c.chainRest ? '다음 · ' + c.next : p.t === 'setrest' && c.kind === 'hang' ? '다음 세트 · ' + grip : grip);
   const nx = RUN.phases[RUN.i + 1];
-  setText('rNext', nx ? `다음 · ${phaseName(nx, c)[1]} ${durText(nx.d)}` : single ? '' : '마지막');
+  setText('rNext', c.chainRest ? (c.nextD || '') : nx ? `다음 · ${phaseName(nx, c)[1]} ${durText(nx.d)}` : single ? '' : '마지막');
   document.getElementById('rPlus').hidden = p.t === 'work' || p.t === 'prep';
   // 신호
   const prev = RUN.phases[RUN.i - 1];
-  lockInfo(at);
+  // 잠금화면 정보(이미지 포함)는 무거워서: 템포는 세트가 시작될 때만, 화면이 꺼져 있으면 매번
+  if (document.hidden || !(c.kind === 'tempo' && p.t === 'work' && !(p.seg === 0 && p.rep === 1))) lockInfo(at);
   if (p.t === 'work' && prev && (prev.t === 'setrest' || (prev.t === 'rest' && prev.d >= 20))) notify(c.kind === 'hang' ? '매달려!' : '시작!', `${c.title || '타이머'} · ${p.set}/${c.sets}세트`);
   else if (p.t === 'setrest') notify(`${c.kind === 'hang' || c.kind === 'tempo' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`, `${c.title || '타이머'} · ${p.set}/${c.sets} 끝`);
   if (c.kind === 'tempo') return tempoSignal(p, prev, c);
   if (prev && (prev.t === 'rest' || prev.t === 'setrest') && p.t === 'work' && prev.d >= 20) { endAlarm(T().endAlert === 'repeat' ? 2 : 1); }
   else if (RUN.i > 0) flashScreen();
-  if (p.t === 'work') { beep(1046, 0.4, 0.35); buzz(250); say(c.kind === 'hang' ? '매달려' : '시작'); }
+  if (p.t === 'work') { beep(1046, 0.4, 0.35); buzz(250); say(c.kind === 'hang' ? '매달려' : RUN.chain && c.workLabel ? c.workLabel + ' 시작' : '시작'); }
+  else if (p.t === 'rest' && c.chainRest) { beep(587, 0.3); buzz([80, 60, 80]); say(`잘했어요. 휴식 ${durText(p.d)}. 다음은 ${c.nextName || c.next}`); }
   else if (p.t === 'rest') { beep(587, 0.3); buzz([80, 60, 80]); if (p.d >= 5 || c.kind === 'rest') say('휴식'); }
   else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${c.kind === 'hang' ? '세트' : '라운드'} 휴식 ${durText(p.d)}`); }
   else if (p.t === 'prep') say('준비');
@@ -276,11 +313,10 @@ function tempoSignal(p, prev, c) {
   document.querySelectorAll('#rTempo i').forEach(e => e.classList.toggle('on', p.t === 'work' && +e.dataset.k === p.seg));
   if (p.t === 'work') {
     if (prev && prev.t === 'setrest' && prev.d >= 20) endAlarm(1);
-    if (p.seg === 0) {
-      beep(1046, 0.12, 0.3); buzz(60);
-      const head = p.rep === 1 ? [p.part, p.side].filter(Boolean).join(' ') : '';
-      say((head ? head + ', ' : '') + countWord(p.rep));
-    } else beep(/정지/.test(p.lab) ? 660 : 880, 0.1, 0.25);
+    if (p.seg === 0) buzz(60);
+    if (T().voice) cueOnce(RUN.i, 0); // 보통은 이미 0.18초 일찍 말했음 → 안 했을 때만
+    else if (p.seg === 0) beep(1046, 0.12, 0.3);
+    else beep(/정지/.test(p.lab) ? 660 : 880, 0.1, 0.25);
     if (p.rep === c.reps && p.seg === c.tempo.length - 1) flashScreen();
   } else if (p.t === 'rest') { beep(587, 0.25); buzz([80, 60, 80]); say(p.note || '전환'); }
   else if (p.t === 'setrest') { beep(587, 0.3); buzz([80, 60, 80]); say(`${p.set}세트 끝. 휴식 ${durText(p.d)}`); }
@@ -314,16 +350,22 @@ function tickCore() {
   const p = RUN.phases[RUN.i];
   const rem = RUN.paused ? RUN.remain : RUN.end - now;
   const sec = Math.ceil(rem / 1000);
+  // 템포 음성: 이 구간의 2초째부터 "둘, 셋" · 다음 구간 첫마디는 조금 일찍
+  if (RUN.cfg.kind === 'tempo' && !RUN.paused && T().voice) {
+    if (p.t === 'work') { const k = Math.floor((p.d * 1000 - rem + SPEAK_LEAD) / 1000); if (k >= 1 && k < p.d) cueOnce(RUN.i, k); }
+    const nx = RUN.phases[RUN.i + 1];
+    if (nx && nx.t === 'work' && rem <= SPEAK_LEAD) cueOnce(RUN.i + 1, 0);
+  }
   if (sec !== RUN.lastSec) {
     RUN.lastSec = sec;
-    lockInfo(now);
+    if (document.hidden) lockInfo(now); // 잠금화면 정보는 화면이 꺼졌을 때만 매초 (켜져 있을 땐 단계가 바뀔 때만 → 아이폰 끊김 줄임)
     const tw = RUN.cfg.kind === 'tempo' && p.t === 'work';
     setText('rNum', tw ? String(p.rep) : p.d >= 60 && sec >= 60 ? mmss(sec) : String(Math.max(0, sec)));
     if (tw) setText('rSub', `${p.lab} · ${Math.max(0, sec)}초`);
     document.getElementById('rNum').classList.toggle('long', !tw && p.d >= 60 && sec >= 60);
     setText('rTotal', mmss(remainingTotal(now)));
     if (!RUN.paused && sec === 10 && p.d >= 30 && p.t !== 'work') say('10초 남았어요');
-    if (tw) { if (!RUN.paused && sec > 0 && sec < p.d) beep(1500, 0.03, 0.12); }
+    if (tw) { if (!RUN.paused && !T().voice && sec > 0 && sec < p.d) beep(1500, 0.03, 0.12); }
     else if (!RUN.paused && p.t === 'work' && RUN.cfg.kind === 'interval' && p.d >= 20 && sec === Math.floor(p.d / 2) && sec > 3) say('절반');
     if (!tw && !RUN.paused && sec <= 3 && sec > 0 && p.d > 3) { beep(880, 0.09); if (sec === 3 && RUN.phases[RUN.i + 1] && RUN.phases[RUN.i + 1].t === 'work' && p.t !== 'prep') say('셋'); }
   }
@@ -364,7 +406,7 @@ function buildRunner() {
   el.hidden = false;
   document.body.classList.add('lock');
   el.innerHTML = `
-    <div class="r-top"><button class="r-icon" data-act="r-stop" aria-label="그만하기">${ic('close')}</button><div class="r-title">${esc(c.title || '타이머')}</div><div class="r-total"><small>남은</small><span id="rTotal">0:00</span></div></div>
+    <div class="r-top"><button class="r-icon" data-act="r-stop" aria-label="그만하기">${ic('close')}</button><div class="r-title">${esc(c.title || '타이머')}${RUN.chain ? `<small class="r-chain">연속 진행 · ${RUN.chain.i + 1}/${RUN.chain.n} 단계</small>` : ''}</div><div class="r-total"><small>남은</small><span id="rTotal">0:00</span></div></div>
     <div class="r-meta" ${c.kind === 'rest' ? 'hidden' : ''}><div><span>${c.kind === 'interval' ? 'ROUND' : 'SET'}</span><b id="rSet"></b></div><div><span>REP</span><b id="rRep"></b></div></div>
     <div class="r-ring">
       <svg viewBox="0 0 300 300" aria-hidden="true"><circle cx="150" cy="150" r="${ARC_R}" class="r-bg"/><circle id="rArc" cx="150" cy="150" r="${ARC_R}" class="r-arc" stroke-dasharray="${ARC_C.toFixed(1)}" transform="rotate(-90 150 150)"/></svg>
@@ -380,8 +422,60 @@ function buildRunner() {
     </div>
     <button class="r-plus" id="rPlus" data-act="r-plus">+15초</button>`;
 }
+// ---------- 연속 진행: 운동 → 휴식 → 다음 운동을 자동으로 ----------
+// 단계 하나를 타이머 설정으로. 타이머가 없는 단계(워밍업 5분·정리 3분)는 연속 진행에서 제목의 분만큼 카운트다운
+function stepRunCfg(d, st, inChain) {
+  if (!st || st.skip) return null;
+  if (st.tm) {
+    if (st.tm.kind === 'hang') { const c = hangTodayCfg(d, st.tm.sets); c.title = st.t; c.grips = T().hang.grips.slice(); fixGrips(c); return c; }
+    if (st.tm.kind === 'rest') return inChain ? null : { kind: 'rest', work: st.tm.work, title: st.tm.title || '휴식' }; // 세트를 직접 하는 단계 → 연속 진행은 여기서 멈춤
+    return Object.assign({ prep: 5, rest: 0, reps: 1, sets: 1, setRest: 0 }, st.tm, { title: st.tm.title || st.t });
+  }
+  const m = inChain && (st.t || '').match(/(\d+)(?:~\d+)?\s*분/);
+  if (m) return { kind: 'interval', title: st.t, workLabel: st.t.replace(/\s*\d+(?:~\d+)?\s*분.*$/, '').trim() || '진행', prep: 3, work: +m[1] * 60, rest: 0, reps: 1, sets: 1, setRest: 0 };
+  return null;
+}
+function chainNextIndex(d, after) {
+  const x = day(d), ch = x.checks || {}, steps = getSteps(x.session, d);
+  for (let k = after + 1; k < steps.length; k++) if (!steps[k].skip && !ch[steps[k].id]) return k;
+  return -1;
+}
+function startChain(d, from) {
+  const x = day(d), steps = getSteps(x.session, d), ch = x.checks || {};
+  let i = from;
+  while (i < steps.length && (steps[i].skip || ch[steps[i].id])) i++;
+  if (i >= steps.length) return toast('남은 단계가 없습니다');
+  const c = stepRunCfg(d, steps[i], true);
+  if (!c) { ui.focus = { date: d, i }; renderFocus(); return toast('이 단계는 직접 하고 "완료하고 다음"을 누르세요'); }
+  startRun(c, { date: d, id: steps[i].id }, { date: d, i, n: steps.length });
+}
+// 운동 하나가 끝나면 → 그 운동의 휴식 시간만큼 쉬고 → 다음 운동 타이머를 바로 시작
+function chainAdvance() {
+  const ch = RUN.chain, c = RUN.cfg, d = ch.date, steps = getSteps(day(d).session, d);
+  if (c.chainRest) {
+    const st = steps[ch.i], nc = stepRunCfg(d, st, true);
+    if (!nc) { // 타이머로 할 수 없는 단계: 화면에 띄우고 멈춤
+      closeRunner(); ui.focus = { date: d, i: ch.i }; renderFocus();
+      chime(); say(`다음은 ${st.name || st.t}. 직접 하고 완료를 누르세요`);
+      return;
+    }
+    chime();
+    return startRun(nc, { date: d, id: st.id }, { date: d, i: ch.i, n: ch.n });
+  }
+  const j = chainNextIndex(d, ch.i), cur = steps[ch.i], nx = steps[j];
+  const rs = cur && cur.rest ? Math.min(180, Math.max(30, cur.rest)) : 20; // 운동 사이 휴식: 그 운동의 휴식 시간 (없으면 20초 준비)
+  const nextName = nx.name || nx.t.replace(/\s*\d+(?:~\d+)?\s*분.*$/, '');
+  startRun({ kind: 'rest', work: rs, title: '휴식 · 다음 운동 준비', chainRest: true, next: nx.t, nextName, nextD: nx.d || '' }, null, { date: d, i: j, n: ch.n });
+}
 function finishRun(stopped) {
   stopAlarm();
+  // 연속 진행 중이면: 이 단계를 완료로 표시하고 다음으로 (끝 알림·완료 화면 없이)
+  if (RUN.chain && !stopped) {
+    const c0 = RUN.cfg;
+    if (RUN.from) { const x = dayW(RUN.from.date); x.checks = x.checks || {}; x.checks[RUN.from.id] = true; save(); }
+    if (c0.chainRest || chainNextIndex(RUN.chain.date, RUN.chain.i) >= 0) { RUN.done = true; return chainAdvance(); }
+    RUN.chainDone = true;
+  }
   RUN.done = true;
   releaseAwake();
   bgStop();
@@ -390,7 +484,7 @@ function finishRun(stopped) {
     notify(c.kind === 'rest' ? '휴식 끝 · 다시 시작!' : '완료!', c.title || '타이머');
     const rep = T().endAlert === 'repeat';
     endAlarm(rep ? 8 : 1);
-    say(c.kind === 'rest' ? '휴식 끝. 다시 시작하세요' : '완료. 수고했어요');
+    say(RUN.chainDone ? '세션 완료. 수고했어요' : c.kind === 'rest' ? '휴식 끝. 다시 시작하세요' : '완료. 수고했어요');
   }
   const setsDone = new Set(RUN.work.filter(p => p.rep === c.reps).map(p => p.set)).size;
   const hangSec = RUN.work.reduce((a, p) => a + p.d, 0);
@@ -414,7 +508,7 @@ function finishRun(stopped) {
     <div class="r-top"><span class="r-icon ghost"></span><div class="r-title">${esc(c.title || '타이머')}</div><span class="r-icon ghost"></span></div>
     <div class="r-done">
       <div class="r-badge">${ic(stopped ? 'close' : 'check')}</div>
-      <h2>${stopped ? '중단했어요' : '완료!'}</h2>
+      <h2>${stopped ? '중단했어요' : RUN.chainDone ? '세션 완료!' : '완료!'}</h2>
       <div class="r-sum">
         ${c.kind === 'rest' ? `<div><b>${durText(c.work)}</b><span>휴식</span></div>` : `
         <div><b>${setsDone}<small>/${c.sets}</small></b><span>${c.kind === 'interval' ? '라운드' : '세트'}</span></div>
@@ -423,13 +517,16 @@ function finishRun(stopped) {
       ${saved ? `<p class="r-saved">${ic('check')}${saved}</p>` : ''}
       ${!stopped && T().endAlert === 'repeat' ? `<button class="alarm-stop" data-act="r-alarm-stop">알림 끄기</button>` : ''}
       <button class="btn-xl" data-act="r-close">닫기</button>
-      ${stopped ? '' : `<button class="r-again" data-act="r-again">${ic('swap')}한 번 더</button>`}
+      ${stopped || RUN.chain ? '' : `<button class="r-again" data-act="r-again">${ic('swap')}한 번 더</button>`}
     </div>`;
   if (typeof render === 'function') { const keep = ui.focus; render(); ui.focus = keep; renderFocus(); }
 }
 function closeRunner() {
   stopAlarm();
   bgStop();
+  // 연속 진행이 끝났으면 세션 완료 화면(운동 시간·RPE 입력)으로
+  if (RUN.chainDone && RUN.chain) { const d = RUN.chain.date; ui.focus = { date: d, i: getSteps(day(d).session, d).length }; }
+  else if (RUN.chain && RUN.from) { const d = RUN.chain.date; ui.focus = { date: d, i: RUN.chain.i }; }
   RUN = { on: false };
   releaseAwake();
   try { speechSynthesis.cancel(); } catch (e) { /* 무시 */ }
@@ -541,13 +638,11 @@ document.addEventListener('click', e => {
     case 't-rest': return startRun({ kind: 'rest', work: +b.dataset.sec, title: `휴식 ${durText(+b.dataset.sec)}` });
     case 't-step': {
       const d = b.dataset.date, st = getSteps(sessOn(d), d).find(x => x.id === b.dataset.id);
-      if (!st || !st.tm) return;
-      let c;
-      if (st.tm.kind === 'hang') { c = hangTodayCfg(d, st.tm.sets); c.title = st.t; c.grips = T().hang.grips.slice(); fixGrips(c); }
-      else if (st.tm.kind === 'rest') c = { kind: 'rest', work: st.tm.work, title: st.tm.title || '휴식' };
-      else c = Object.assign({ prep: 5, rest: 0, reps: 1, sets: 1, setRest: 0 }, st.tm, { title: st.tm.title || st.t });
+      const c = st && st.tm ? stepRunCfg(d, st, false) : null;
+      if (!c) return;
       return startRun(c, { date: d, id: st.id });
     }
+    case 't-chain': return startChain(b.dataset.date, +b.dataset.i);
     case 'r-pause': return togglePause();
     case 'r-next': return jump(1);
     case 'r-prev': return jump(-1);
@@ -555,7 +650,7 @@ document.addEventListener('click', e => {
     case 'r-stop':
       if (RUN.done) return closeRunner();
       if (!RUN.paused) togglePause();
-      if (confirm(RUN.work.length && RUN.cfg.kind === 'hang' ? '그만할까요? 여기까지 한 세트는 기록에 남깁니다.' : '타이머를 그만할까요?')) return finishRun(true);
+      if (confirm(RUN.chain ? '연속 진행을 그만할까요? 끝낸 운동은 완료로 남습니다.' : RUN.work.length && RUN.cfg.kind === 'hang' ? '그만할까요? 여기까지 한 세트는 기록에 남깁니다.' : '타이머를 그만할까요?')) return finishRun(true);
       return togglePause();
     case 'r-close': return closeRunner();
     case 'r-again': { const c = RUN.cfg, f = RUN.from; return startRun(c, f); }

@@ -295,6 +295,8 @@ function dbPick(target) {
   return l.reduce((b, k) => (Math.abs(k - target) < Math.abs(b - target) ? k : b), l[0]);
 }
 const equipText = () => { const e = equip(), l = (e.db || []).slice().sort((a, b) => a - b); return [e.bar ? '철봉' : '철봉 없음', e.hangboard ? '행보드' : '', e.band ? '밴드' : '', l.length ? `덤벨 ${l.join('·')}kg` : '덤벨 없음'].filter(Boolean).join(' · '); };
+// 손가락이 아픈 상태인지: 이번 주 손가락 통증 기록 또는 어제 기록 (매달리는 운동을 빼는 기준)
+const fingerSore = date => liveFlags(date).fingerWeek >= 1 || lvOf(day(addDays(date, -1)).finger) >= 1;
 function getSteps(sid, date) {
   const w = Math.max(1, weekNo(date)), cfg = weekCfg(w), mode = cfg.home, rec = !!cfg.recovery;
   const f = liveFlags(date), hang = hangFor(date), pull = pullFor(date);
@@ -311,7 +313,7 @@ function getSteps(sid, date) {
     // 내 운동 기구에 없는 기구가 필요한 단계 → 대체 운동
     const ea = PLAN.equipAlt[sid + ':' + st.id];
     let altEx = null;
-    if (ea && !equip()[ea.need]) {
+    if (ea && (!equip()[ea.need] || (ea.painAlt && fingerSore(date)))) {
       if (ea.alt.t) st = Object.assign({}, st, { t: ea.alt.t, d: ea.alt.d, tm: null, deload: null });
       else altEx = Object.assign({}, ea.alt, (ea.altT || {})[tierIdx()] || {});
     }
@@ -331,6 +333,7 @@ function getSteps(sid, date) {
       if (home && mode === 'sets') s += 1;
       if (rec) { s = Math.min(s, 2); if (sid === 'homeC' && st.id === 'p' && !altEx) { s = 3; r = '4'; } }
       o.t = `${n} ${s}×${r}`;
+      o.name = n; o.rest = restSec(rest) || 0; // 영상 검색·연속 진행(운동 사이 휴식)에 씀
       o.d = [rest ? `휴식 ${rest}` : '', tip].filter(Boolean).join(' · ');
       if (home && !rec && mode === 'sets') o.note = '세트 +1';
       else if (home && !rec && reps && mode === 'reps') o.note = '+2회';
@@ -779,6 +782,7 @@ function sessionBlock(date) {
   if (lf.fingerWeek && (sid === 'limit' || sid === 'volume')) warns.push('손가락 통증 기록 주간: 크림프 위주 문제는 피하세요.');
   const extra = [];
   if (sid === 'strength') extra.push(`<button class="chipbtn" data-act="pick" data-date="${date}" data-sid="homeC">${ic('swap')}암장 못 감 → 집 C</button>`);
+  if (/^home/.test(sid)) extra.unshift(`<button class="chipbtn on" data-act="t-chain" data-date="${date}" data-i="0">${ic('play', 'fill')}이어서 하기 (운동 → 휴식 → 다음 운동 자동)</button>`);
   if (sid === 'homeC') extra.push(`<button class="chipbtn" data-act="pick" data-date="${date}" data-sid="strength">${ic('swap')}암장 근력으로 되돌리기</button>`);
   if ((sid === 'strength' || sid === 'homeC') && w >= 3 && !cfg.recovery) {
     const on = !!(state.weeks[mon] && state.weeks[mon].hold);
@@ -805,7 +809,7 @@ function sessionBlock(date) {
         <span class="step-no">${checks[st.id] ? ic('check') : pad(i + 1)}</span>
         <span class="st-txt"><b>${esc(st.t)}${st.note ? ` <em>${st.note}</em>` : ''}</b>${st.skip ? `<small class="skip-why">${st.skip}</small>` : st.d ? `<small>${esc(st.d)}</small>` : ''}</span>
       </button>
-      ${guideBtn(sid, st.id)}
+      ${guideBtn(sid, st.id, '', date)}${videoBtn(sid, st, '')}
       ${st.tm ? `<button class="step-tm" data-act="t-step" data-date="${date}" data-id="${st.id}" aria-label="${esc(st.t)} 타이머">${ic('timer')}<small>${tmLabel(st.tm)}</small></button>` : ''}
     </li>`).join('')}</ol>
     ${extra.length ? `<div class="chips">${extra.join('')}</div>` : ''}
@@ -913,7 +917,8 @@ function renderFocus() {
       <h2 class="f-name">${esc(st.t)}</h2>
       ${st.note ? `<span class="pill i-${s.intensity}">${st.note}</span>` : ''}
       ${st.skip ? `<p class="warn">${ic('alert')}${st.skip}</p>` : st.d ? `<p class="f-desc">${esc(st.d)}</p>` : ''}
-      ${guideBtn(sid, st.id, 'wide')}
+      <div class="f-help">${guideBtn(sid, st.id, 'wide', d)}${videoBtn(sid, st)}</div>
+      ${/^home/.test(sid) && !st.skip ? `<button class="f-chain" data-act="t-chain" data-date="${d}" data-i="${i}">${ic('play', 'fill')}<span><b>여기서부터 이어서 하기</b><small>운동 → 휴식 → 다음 운동을 자동으로 · 음성 안내</small></span></button>` : ''}
       ${st.tm ? `<button class="f-timer" data-act="t-step" data-date="${d}" data-id="${st.id}">${ic('timer')}<span><b>타이머 시작</b><small>${st.tm.kind === 'rest' ? durText(st.tm.work) + ' 휴식' : st.tm.kind === 'hang' ? '행보드 · ' + (hangFor(d).short || '') : (st.tm.title || '') + ' · ' + tmLabel(st.tm)}</small></span>${ic('play', 'fill')}</button>` : ''}
     </div>
     <div class="f-ctrl">

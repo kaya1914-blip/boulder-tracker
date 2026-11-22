@@ -194,6 +194,32 @@
   ln = slotsFor('2026-11-24').find(x => x.id === 'l');
   check('급식 끄면 지금처럼 직접 입력 추천', !ln.cafe && Array.isArray(ln.sug[0]));
 
+  // 집 운동 순서·방법
+  scene({});
+  const aIds = getSteps('homeA', '2026-11-17').map(x => x.id), PUSH = ['pk', 'pu', 'ts'];
+  check('집 A: 밀기 운동끼리 붙어 있지 않음 (파이크 → Y·T·W → 푸시업)', aIds.every((id, k) => !(PUSH.includes(id) && PUSH.includes(aIds[k + 1]))) && aIds.indexOf('pk') < aIds.indexOf('yt') && aIds.indexOf('yt') < aIds.indexOf('pu'), aIds.join(','));
+  check('집 A: 손가락 쉬는 날 운동이라 매달리는 운동 없음', getSteps('homeA', '2026-11-17').every(x => !/행잉|매달|데드행|토투바/.test(x.t)), getSteps('homeA', '2026-11-17').map(x => x.t).join(' / '));
+  scene({ '2026-11-17': { finger: 1 } }, { equip: { bar: true, db: [5] } });
+  check('손가락 아픈 주: 집 B 데드행 → 광배 스트레칭 (철봉 있어도)', /차일드 포즈/.test(getSteps('homeB', '2026-11-18').find(x => x.id === 'dh').t) && guideKeys('homeB', 'dh', '2026-11-18')[0] === 'lat_stretch');
+
+  // 템포 음성 · 연속 진행 · 영상
+  check('템포 음성: 회차 시작 "3회 내려" · 2초째부터 "둘"', tempoCue({ t: 'work', seg: 0, rep: 3, lab: '내리기' }, 0) === '3회 내려' && tempoCue({ t: 'work', seg: 0, rep: 3, lab: '내리기' }, 1) === '둘' && tempoCue({ t: 'work', seg: 2, rep: 3, lab: '올리기' }, 0) === '올려');
+  check('템포 음성: 첫 회는 좌우·묶음도 말함', tempoCue({ t: 'work', seg: 0, rep: 1, lab: '들기', part: 'Y', side: '' }, 0) === 'Y 1회 들어');
+  scene({ '2026-11-17': { session: 'homeA' } });
+  const aSt = getSteps('homeA', '2026-11-17');
+  const wc = stepRunCfg('2026-11-17', aSt[0], true), pc = stepRunCfg('2026-11-17', aSt.find(x => x.id === 'pk'), true);
+  check('연속 진행: 워밍업 5분은 5분 카운트다운 · 운동은 템포 타이머', wc && wc.work === 300 && pc && pc.kind === 'tempo' && !stepRunCfg('2026-11-17', aSt[0], false), JSON.stringify([wc && wc.work, pc && pc.kind]));
+  startChain('2026-11-17', 1);
+  const c1 = RUN.cfg.title; finishRun(false);
+  const restCfg = RUN.cfg; finishRun(false);
+  const c2 = RUN.cfg.title;
+  check('연속 진행: 운동 끝 → 그 운동 휴식(90초) → 다음 운동 자동 시작 · 끝낸 단계 완료 표시', /파이크/.test(c1) && restCfg.chainRest && restCfg.work === 90 && /Y·T·W/.test(c2) && day('2026-11-17').checks.pk === true, [c1, restCfg.work, c2].join(' → '));
+  finishRun(true); closeRunner(); ui.focus = null;
+  check('영상: 내 레벨로 바뀐 운동 이름으로 검색', videoQuery('homeA', aSt.find(x => x.id === 'pu')) === '푸시업 자세' && !/kg/.test(videoQuery('homeA', aSt.find(x => x.id === 'rc'))) && /youtube\.com\/results/.test(videoBtn('homeA', aSt[0])), videoQuery('homeA', aSt.find(x => x.id === 'rc')));
+  scene({}, { level: 0 });
+  check('영상: 입문은 무릎 푸시업으로 검색', videoQuery('homeA', getSteps('homeA', '2026-11-17').find(x => x.id === 'pu')) === '무릎 푸시업 자세');
+  check('모든 운동 가이드에 영상 검색어', Object.keys(GUIDE).every(k => GUIDE_YT[k]), Object.keys(GUIDE).filter(k => !GUIDE_YT[k]).join(','));
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');
@@ -219,7 +245,7 @@
   ui.focus = null; renderFocus();
   check('운동 방법 연결: 외회전·회내회외·집 C 행보드', guideKeys('homeA', 'er').length === 1 && guideKeys('homeA', 'pr').length === 1 && guideKeys('homeC', 'h')[0] === 'hangboard' && Object.values(STEP_GUIDE).flat().every(k => !!GUIDE[k]));
   scene({}, { equip: { bar: false, db: [5] } });
-  check('철봉 없어 대체된 단계는 원래 운동 설명 숨김', guideKeys('homeA', 'll').length === 0 && guideKeys('homeA', 'pu').length === 1);
+  check('철봉 없어 대체된 단계는 원래 운동 설명 숨김', guideKeys('homeC', 'll').length === 0 && guideKeys('homeA', 'pu').length === 1);
   scene({});
   state.outdoor = [{ id: 'o1', date: '2026-11-01', v: 7, area: '내원사', name: '테스트', tries: 3, style: 'project', note: '' }];
   check('프로젝트는 완등 등급에 미반영 · 완등 버튼 표시', sendLevel('2026-11-16').outdoor == null && /data-act="ou-send"/.test(outdoorView()));
