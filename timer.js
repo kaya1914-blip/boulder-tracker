@@ -461,7 +461,7 @@ function viewTimer() {
     const today = { id: 'today', name: '오늘 권장', sub: h.skip ? '이번 주 행보드 생략' : `${tier().hangSeconds[h.lvl]}초 × ${tier().hangSets || 5} · ${h.short}` };
     const tot = totalSec(c), hangT = c.work * c.reps * c.sets;
     body = `${h.skip ? `<p class="warn">${ic('alert')}${h.skip}. 그래도 쓰려면 강도를 낮게 잡으세요.</p>` : ''}
-      ${liveFlags(todayStr()).fingerWeek ? `<p class="warn">${ic('finger')}이번 주 손가락 통증 기록이 있습니다. 행보드는 쉬는 걸 권합니다.</p>` : ''}
+      ${liveFlags(todayStr()).fingerWeek >= 2 ? `<p class="warn">${ic('finger')}이번 주 손가락 통증(${lvName(liveFlags(todayStr()).fingerWeek)}) 기록이 있습니다. 행보드는 쉬는 걸 권합니다.</p>` : liveFlags(todayStr()).fingerWeek === 1 ? `<p class="warn">${ic('finger')}이번 주 손가락 통증(조금) 기록이 있습니다. 행보드는 한 단계 낮춰서, 아프면 바로 멈추세요.</p>` : ''}
       <div class="seg board" role="group" aria-label="행보드 종류">${Object.entries(PLAN.boards).map(([id, b]) => `<button class="${board() === b ? 'on' : ''}" data-act="t-board" data-v="${id}">${b.short}</button>`).join('')}</div>
       ${presetCards([today, ...PLAN.hangPresets.slice(1)], t.hangPreset, 't-preset')}
       <section class="card">

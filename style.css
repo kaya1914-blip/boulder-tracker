@@ -824,3 +824,25 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .ou-btn { border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2); border-radius: 8px; padding: 4px 8px; font-size: 12px; font-weight: 700; min-height: 30px; }
 .ou-btn.ok { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .ou-acts .fr-del { width: 28px; height: 28px; margin-left: 0; }
+
+/* 몸 상태 정도 (조금·중간·많이) */
+.plvs { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.plv { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.plv-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.plv-h b { font-size: 13.5px; }
+.plv-seg { background: var(--surface-3, var(--surface-2)); }
+.plv-seg button { padding: 7px 12px; min-height: 36px; }
+.plv small { display: block; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+
+/* 회사 급식 */
+#cafe textarea { width: 100%; font: inherit; }
+#cafe code { font-size: 12px; background: var(--surface-2); border-radius: 6px; padding: 1px 5px; }
+.cafe-list { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.cafe-list li { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.cafe-list li > small { display: block; margin-top: 4px; color: var(--muted); line-height: 1.55; }
+.cafe-list em { font-style: normal; font-size: 11.5px; color: var(--muted); }
+.cafe-list em.bad { color: var(--red); font-weight: 600; }
+.cf-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cf-h span { color: var(--ink-2); font-weight: 600; }
+.cafe-wk { margin-top: 8px; }
+.cafe-wk summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600; padding: 6px 0; }

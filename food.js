@@ -59,29 +59,157 @@ function slotsFor(date) {
   const sid = sessOn(date), s = S(sid), gym = isGymDay(date);
   const pf = verdict(addDays(mondayOf(date), -7)).flags;
   const dayTime = gym && day(date).time === 'day';
-  return PLAN.meals[gym ? 'gym' : 'rest']
+  const list = PLAN.meals[gym ? 'gym' : 'rest']
     .filter(m => !(m.longOnly && s.min < 120))
-    .filter(m => !(dayTime && m.id === 'e'))
     .map(m => {
       let sug = m.sug === 'DINNER' ? dinnerItems(dinnerDefault(date), date) : (m.sug || []).map(([f, q]) => (f === 'RICE' ? ['rice', riceQty(date)] : [f, q])).filter(([, q]) => q > 0);
-      let t = m.t, tip = m.tip || '';
+      let t = m.t, tip = m.tip || '', cafe = false;
       if (m.id === 'd') tip = `오늘 추천 · ${PLAN.dinners[dinnerDefault(date)].n}`;
       if (dayTime && m.id === 'l') { sug = PLAN.meals.dayWorkoutLunch.slice(); t = '점심 (운동 2시간 전)'; tip = '또는 김밥 2줄'; }
-      if (gym && pf.fast && m.id === (dayTime ? 'n' : 'e')) sug = sug.concat([PLAN.meals.fastLossExtra]);
-      return { id: m.id, t, tip, sug };
+      else if (m.id === 'l' && cafeToday(date)) { sug = cafeItems(date); t = '점심 · 회사 급식'; tip = '안 먹은 건 ✕, 더 먹은 건 +'; cafe = true; }
+      if (gym && pf.fast && m.id === 'i') sug = sug.concat([PLAN.meals.fastLossExtra]);
+      return { id: m.id, t, tip, sug, cafe };
     });
+  // 예전 기록에만 있는 끼니 칸(운동 전 간식 등)은 기록이 있을 때만 그대로 보여 줌
+  const fd = day(date).food || {}, ids = new Set(list.map(x => x.id));
+  Object.keys(fd).filter(k => !ids.has(k) && (fd[k] || []).length).forEach(k => {
+    list.splice(Math.max(0, list.length - 1), 0, { id: k, t: PLAN.meals.legacySlots[k] || k, tip: '', sug: [] });
+  });
+  return list;
+}
+
+// ---------- 회사 급식 (선택) ----------
+// 설정에서 켜고 주간 메뉴를 붙여넣으면 그 날 점심 추천이 급식 메뉴로 바뀝니다. 끄면 지금처럼 직접 입력.
+// state.cafe = { 'YYYY-MM-DD': [{ n, k, p, u, rice?, est?, unk?, auto? }] }
+const cafeMenus = () => (state.cafe = isObj(state.cafe) ? state.cafe : {});
+const cafeToday = date => !!state.settings.cafeOn && (cafeMenus()[date] || []).length > 0;
+// 밥 종류(쌀밥·잡곡밥 등): 그날 밥 양(riceQty)으로 바꿔 넣음
+const CAFE_RICE = /^(쌀|흰|흰쌀|백미|잡곡|현미|흑미|보리|기장|귀리|오곡|콩|찰|발아현미)?밥(\(.*\))?$/;
+// 밥이 따로 안 나오는 한 그릇 메뉴
+const CAFE_ONEBOWL = /라이스|덮밥|비빔밥|볶음밥|김밥|국밥|짜장|짬뽕|우동|국수|냉면|파스타|스파게티|리조또|오므라이스|주먹밥|떡볶이/;
+function cafeItems(date) {
+  const rq = riceQty(date);
+  return (cafeMenus()[date] || []).map(d => ({ n: d.n, k: d.k, p: d.p, u: d.u || '1인분', q: d.rice ? rq : 1 })).filter(it => it.q > 0);
+}
+// 메뉴를 붙여넣을 주: 주말이면 다음 주, 평일이면 이번 주
+function cafeDefaultMon(today = todayStr()) { const w = dow(today); return w === 0 || w === 6 ? addDays(mondayOf(today), 7) : mondayOf(today); }
+const CAFE_WD = { 월: 0, 화: 1, 수: 2, 목: 3, 금: 4, 토: 5, 일: 6 };
+// 한 줄 = 하루("월: 물만두국, 제육볶음 280/18") 또는 날짜 머리글 다음 줄부터 반찬 한 줄씩. 숫자는 "칼로리/단백질"(생략하면 음식 DB로 추정)
+function parseCafe(text, mon) {
+  const days = {}, skipped = [];
+  let cur = null;
+  const near = (mo, dd) => { // 연도 없는 날짜: 고른 주와 가장 가까운 해
+    const y0 = +mon.slice(0, 4);
+    return [y0 - 1, y0, y0 + 1].map(y => `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`).sort((a, b) => Math.abs(diffDays(a, mon)) - Math.abs(diffDays(b, mon)))[0];
+  };
+  (text || '').split(/\r?\n/).forEach(raw => {
+    let line = raw.trim(), date = null, m;
+    if (!line || line.startsWith('#')) return;
+    if ((m = line.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})\.?/))) { date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; line = line.slice(m[0].length); }
+    else if ((m = line.match(/^(\d{1,2})[/.](\d{1,2})(?!\d)\.?/))) { date = near(+m[1], +m[2]); line = line.slice(m[0].length); }
+    // 요일: "월", "(월)", "월요일" 뒤에 공백·콜론·괄호·줄끝이 와야 함 (목살구이·수제비 같은 반찬 이름과 구분)
+    m = line.match(/^\s*[(\[]?\s*([월화수목금토일])(요일)?(\s*[)\]])?(\s*)/);
+    if (m && (m[2] || m[3] || m[4] || /^([:：\-–]|$)/.test(line.slice(m[0].length)))) {
+      if (!date) date = addDays(mon, CAFE_WD[m[1]]);
+      line = line.slice(m[0].length);
+    }
+    line = line.replace(/^\s*[:：\-–]\s*/, '').trim();
+    if (date) { cur = date; days[cur] = days[cur] || []; }
+    if (!line) return;
+    if (!cur) { skipped.push(raw.trim()); return; }
+    line.split(/[,，·、]/).map(cafeDish).filter(Boolean).forEach(d => days[cur].push(d));
+  });
+  // 밥이 메뉴에 없고 한 그릇 메뉴도 없으면 밥 1공기를 자동으로 더함 (그날 밥 양으로 바뀜)
+  Object.values(days).forEach(list => {
+    if (list.length && !list.some(d => d.rice || CAFE_ONEBOWL.test(d.n))) list.unshift({ n: '밥 (급식)', k: 310, p: 5.5, u: '1공기', rice: true, auto: true });
+  });
+  Object.keys(days).forEach(k => { if (!days[k].length) delete days[k]; });
+  return { days, skipped };
+}
+// 급식 반찬 이름으로 대략 추정 (구내식당 1인분 기준). 위에서부터 먼저 맞는 규칙을 씀
+// (콩나물제육볶음처럼 여러 말이 섞이면 단백질 재료가 먼저 잡히도록 고기·해물·생선을 나물보다 위에 둠)
+const CAFE_GUESS = [
+  [/카레|라이스|덮밥|비빔밥|볶음밥|국밥|짜장|짬뽕|오므라이스/, 600, 15, '한 그릇'],
+  [/까스|가스|커틀릿|튀김|탕수/, 300, 12, '튀김'],
+  [/(만두|수제비|떡|칼국수|라면|우동).*(국|탕)$|떡국|만둣국/, 250, 8, '탄수화물 국'],
+  [/(소고기|쇠고기|갈비|돼지|닭|오리|사골).*(국|탕|찌개)$/, 180, 12, '고기 국'],
+  [/(황태|북어|대구|동태|조개|바지락).*(국|탕|찌개)$/, 100, 10, '생선 국'],
+  [/(국|탕|찌개|장국)$/, 70, 4, '국'],
+  [/제육|불고기|닭갈비|닭볶음|찜닭|오리|돼지|소고기|쇠고기|갈비|수육|보쌈|함박|스테이크|떡갈비|목살|삼겹/, 280, 18, '고기'],
+  [/쭈꾸미|주꾸미|오징어|낙지|새우|홍합|문어/, 170, 15, '해물'],
+  [/고등어|갈치|삼치|임연수|연어|생선|코다리|가자미|조기|꽁치|동태|명태/, 200, 17, '생선'],
+  [/^(배추|열무|총각|백)?김치$|깍두기|단무지|장아찌|피클|석박지/, 15, 1, '김치류'],
+  [/나물|무침|겉절이|생채|샐러드|쌈/, 40, 2, '나물·무침'],
+  [/계란|달걀|두부|메추리알/, 150, 11, '계란·두부'],
+  [/어묵|오뎅/, 120, 6, '어묵'],
+  [/햄|소시지|스팸|베이컨/, 200, 8, '햄'],
+  [/멸치|진미채|건새우|쥐포/, 90, 7, '멸치·진미'],
+  [/잡채|떡|전$|부침|파전|감자채/, 200, 5, '전·잡채'],
+  [/버섯|감자|연근|우엉|가지|호박|무조림|야채|채소|콩나물|숙주|브로콜리|곤약/, 70, 2, '채소 반찬'],
+  [/과일|사과|귤|배$|바나나|요구르트|요플레|푸딩|주스/, 80, 1, '후식'],
+];
+function cafeGuess(n) {
+  const q = n.replace(/\s+/g, '');
+  // 급식 규칙이 먼저 (식당 1인분인 음식 DB보다 급식 양에 가까움), 그다음 음식 DB 같은 이름, 마지막에 비슷한 이름
+  const g = CAFE_GUESS.find(([re]) => re.test(q));
+  if (g) return { k: g[1], p: g[2], how: g[3] };
+  const exact = FOODS.concat(myFoods()).find(f => normName(f.n) === q || (f.a || '').split(' ').includes(q));
+  if (exact) return { k: exact.k, p: exact.p, how: exact.n };
+  const f = estimateFood(n);
+  return f ? { k: f.k, p: f.p, how: f.n } : null;
+}
+function cafeDish(raw) {
+  const s0 = raw.trim();
+  if (!s0) return null;
+  const m = s0.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*(?:kcal)?\s*(?:\/\s*(\d+(?:\.\d+)?)\s*g?)?$/i);
+  const n = (m ? m[1] : s0).trim();
+  let k = m ? +m[2] : null, p = m && m[3] != null ? +m[3] : null, est, unk;
+  if (k == null || p == null) {
+    const g = cafeGuess(n);
+    if (k == null) { if (g) { k = g.k; p = g.p; est = g.how; } else { k = 0; p = 0; unk = true; } }
+    else p = g && g.k ? Math.round(g.p * k / g.k * 10) / 10 : 0;
+  }
+  const d = { n, k: Math.round(k), p: Math.round(p * 10) / 10, u: '1인분' };
+  if (CAFE_RICE.test(n.replace(/\s+/g, ''))) { d.rice = true; d.u = '1공기'; }
+  if (est) d.est = est;
+  if (unk) d.unk = true;
+  return d;
+}
+function cafeDayLine(date, list) {
+  const t = list.reduce((a, d) => ({ k: a.k + d.k, p: a.p + d.p }), { k: 0, p: 0 });
+  return `<li><div class="cf-h"><b>${md(date)} ${DOW[dow(date)]}</b><span>${Math.round(t.k).toLocaleString()}kcal · ${Math.round(t.p)}g <small>(밥 1공기 기준)</small></span></div>
+    <small>${list.map(d => `${esc(d.n)} ${d.k}${d.unk ? ' <em class="bad">칼로리 모름 · 숫자를 붙여 주세요</em>' : d.auto ? ' <em>자동 추가</em>' : d.est && d.est !== d.n ? ` <em>추정·${esc(d.est.replace(/ \(.*\)$/, ''))}</em>` : ''}`).join(' · ')}</small></li>`;
+}
+function cafeCard() {
+  const on = !!state.settings.cafeOn;
+  const head = `<section class="card" id="cafe"><div class="card-h"><h2>회사 급식</h2><span class="muted">${on ? '켜짐' : '꺼짐 · 직접 입력'}</span></div>
+    <div class="seg" role="group" aria-label="회사 급식 메뉴 쓰기"><button class="${on ? 'on' : ''}" data-act="f-cafe-on" data-v="1" aria-pressed="${on}">급식 메뉴 쓰기</button><button class="${on ? '' : 'on'}" data-act="f-cafe-on" data-v="0" aria-pressed="${!on}">직접 입력만</button></div>`;
+  if (!on) return head + '<p class="hint">회사 급식을 먹는다면 켜세요. 주간 메뉴를 붙여넣으면 그날 점심 추천이 급식 메뉴로 바뀌어 한 번에 기록하고, 안 먹은 반찬만 빼면 됩니다. 끄면 지금처럼 음식을 골라 직접 입력합니다.</p></section>';
+  const mon = ui.cafeMon || cafeDefaultMon(), pv = ui.cafePrev;
+  const saved = Object.keys(cafeMenus()).sort();
+  const weeks = [...new Set(saved.map(mondayOf))].sort().reverse().slice(0, 4);
+  return head + `
+    <p class="hint">한 줄에 하루씩: <code>월: 물만두국, 콩나물제육볶음 300/19, 참나물무침</code>. 반찬 뒤 숫자는 <b>칼로리/단백질</b>이고, 없으면 음식 DB로 추정합니다. 날짜(<code>11/23</code>)를 앞에 써도 됩니다. 밥이 메뉴에 없으면 1공기를 자동으로 넣고, 그날 밥 양 추천에 맞춰 줄여 줍니다.</p>
+    <label class="field"><span>요일만 쓴 줄은 이 주로 넣기 (월요일)</span><input type="date" id="cafeMon" value="${mon}"></label>
+    <label class="field"><span>주간 메뉴</span><textarea id="cafeTxt" rows="7" placeholder="월: 물만두국, 참나물유자청무침, 콩나물제육볶음, 새송이버섯조림&#10;화: 황태해장국, 오이양파무침, 단호박카레라이스, 생선까스">${esc(ui.cafeDraft || '')}</textarea></label>
+    <div class="btn-row"><button class="btn" data-act="f-cafe-prev">${ic('target')}미리보기</button>${pv && Object.keys(pv.days).length ? `<button class="btn primary" data-act="f-cafe-save">${ic('check')}${Object.keys(pv.days).length}일 저장</button>` : ''}</div>
+    ${pv ? `<ul class="cafe-list">${Object.keys(pv.days).sort().map(d => cafeDayLine(d, pv.days[d])).join('') || '<li class="hint">읽은 메뉴가 없습니다. 줄 앞에 요일(월·화…)이나 날짜를 붙여 주세요.</li>'}</ul>${pv.skipped.length ? `<p class="warn">${ic('alert')}요일·날짜를 못 찾아 뺀 줄: ${pv.skipped.map(esc).join(' / ')}</p>` : ''}` : ''}
+    ${weeks.length ? `<h3 class="h3">저장된 메뉴</h3>${weeks.map(m => { const ds = saved.filter(d => mondayOf(d) === m); return `<details class="cafe-wk"><summary>${md(m)} 주 · ${ds.length}일<button class="sa-btn ghost" data-act="f-cafe-del" data-mon="${m}">지우기</button></summary><ul class="cafe-list">${ds.map(d => cafeDayLine(d, cafeMenus()[d])).join('')}</ul></details>`; }).join('')}` : '<p class="hint">저장된 메뉴가 없습니다.</p>'}
+  </section>`;
 }
 function dietNotes(date) {
   const gym = isGymDay(date), pf = verdict(addDays(mondayOf(date), -7)).flags, notes = [];
   if (gym && day(date).time === 'day') notes.push('낮 운동: 점심을 운동 2시간 전에 든든하게 먹고, 운동 전 계란은 뺍니다.');
-  if (pf.protein) notes.push(`지난주 단백질 평균 ${pf.protein}g으로 부족 → 끼니마다 단백질 반찬(계란·두부·닭가슴살·생선) 하나씩 더`);
-  if (gym && pf.fast) notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 전 식빵 1장 추가');
+  if (pf.protein) notes.push(`지난주 단백질 평균 ${pf.protein}g → 이번 주는 ${pf.proteinStep}g부터 (최종 목표 ${targets(date).protein}g) · 아침 계란 2개 + 운동 직후 단백질 음료·두유부터`);
+  if (gym && pf.fast) notes.push('지난주 판정(과감량·힘 떨어짐) → 운동 중 바나나우유(또는 초코우유) 1팩 추가');
+  if (state.settings.cafeOn && dow(date) >= 1 && dow(date) <= 5 && !cafeToday(date)) notes.push('이 날 급식 메뉴가 아직 없습니다 · 설정 → 회사 급식에서 붙여넣으면 점심을 한 번에 기록합니다');
   if (pf.plateau && goalOf() === 'gain') notes.push('지난주 체중이 늘지 않음 → 오늘은 끼니마다 밥 0.5공기 늘린 양으로 추천합니다');
   else if (!gym && pf.plateau && goalOf() === 'cut') notes.push('지난주 체중 정체 → 오늘은 끼니마다 밥 0.5공기 줄인 양으로 추천합니다');
   return notes;
 }
 const sumItems = items => items.reduce((a, it) => { const f = foodOf(it); a.k += f.k * it.q; a.p += f.p * it.q; return a; }, { k: 0, p: 0 });
-const sugItems = sug => sug.map(([f, q]) => ({ f, q }));
+// 추천 구성: [음식 id, 수량] 또는 급식처럼 값이 직접 적힌 { n, k, p, u, q }
+const sugItems = sug => sug.map(x => (Array.isArray(x) ? { f: x[0], q: x[1] } : { n: x.n, k: x.k, p: x.p, u: x.u, q: x.q }));
 function foodTotals(date) {
   const fd = day(date).food || {};
   const all = Object.values(fd).flat();
@@ -113,7 +241,7 @@ function dietCard(date) {
 const openSlots = () => (ui.openSlots = ui.openSlots || new Set());
 function slotBlock(date, sl, items) {
   const t = sumItems(items), sg = sumItems(sugItems(sl.sug));
-  const sugText = sl.sug.map(([f, q]) => `${foodOf({ f }).n.replace(/ \(.*\)$/, '')} ${qtyText(q)}`).join(' + ');
+  const sugText = sugItems(sl.sug).map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')} ${qtyText(it.q)}`).join(' + ');
   const key = date + ':' + sl.id, open = openSlots().has(key);
   if (!items.length && !open) { // 아직 안 먹은 끼니: 접어 두고 미기록 표시
     return `<button class="slot slot-min slot-empty" data-act="f-open" data-date="${date}" data-slot="${sl.id}" aria-label="${sl.t} 기록하기">
@@ -189,7 +317,13 @@ function quickSets(sh) {
     if (!items.length || seen.has(key(items))) continue;
     seen.add(key(items)); out.push({ t: i === 1 ? '어제 그대로' : `${md(d)} 그대로`, items });
   }
-  if (sl.sug && sl.sug.length) { const items = sugItems(sl.sug); if (!seen.has(key(items))) out.push({ t: '앱 추천', items }); }
+  if (sl.sug && sl.sug.length) {
+    const items = sugItems(sl.sug);
+    if (!seen.has(key(items))) {
+      if (sl.cafe) out.unshift({ t: `오늘 급식 (${md(sh.date)})`, items }); // 급식은 맨 위에
+      else out.push({ t: '앱 추천', items });
+    }
+  }
   myCombos().forEach(c => out.push({ t: '내 조합 · ' + c.n, items: c.items }));
   return out;
 }
@@ -524,6 +658,28 @@ document.addEventListener('click', e => {
         state.foods = myFoods().filter(x => x.id !== f.id); save(); refreshSheet(); render();
       }
       return;
+    }
+    case 'f-cafe-on': state.settings.cafeOn = b.dataset.v === '1'; return commit();
+    case 'f-cafe-prev': {
+      const txt = (document.getElementById('cafeTxt') || {}).value || '', mv = (document.getElementById('cafeMon') || {}).value;
+      ui.cafeMon = mv ? mondayOf(mv) : cafeDefaultMon();
+      ui.cafeDraft = txt; ui.cafePrev = parseCafe(txt, ui.cafeMon);
+      return render();
+    }
+    case 'f-cafe-save': {
+      const pv = ui.cafePrev; if (!pv) return;
+      Object.assign(cafeMenus(), JSON.parse(JSON.stringify(pv.days)));
+      const n = Object.keys(pv.days).length;
+      ui.cafePrev = null; ui.cafeDraft = '';
+      toast(`급식 메뉴 ${n}일 저장 · 그날 점심 추천에 나옵니다`);
+      return commit();
+    }
+    case 'f-cafe-del': {
+      e.preventDefault();
+      const m = b.dataset.mon;
+      if (!confirm(`${md(m)} 주 급식 메뉴를 지울까요? 이미 기록한 점심은 그대로 남습니다.`)) return;
+      Object.keys(cafeMenus()).filter(d => mondayOf(d) === m).forEach(d => delete state.cafe[d]);
+      return commit();
     }
     case 'f-dinner-pick': {
       const x = dayW(d); x.food = x.food || {};

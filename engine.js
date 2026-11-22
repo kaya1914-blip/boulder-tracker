@@ -25,7 +25,9 @@ function recovery(date) {
   for (let i = 1; i <= 28; i++) { const l = L(i), au = l ? l.au : 0; if (i <= 7) acute += au; chronic += au; if (state.days[addDays(date, -i)]) span = i; }
   const base = span >= 14 ? chronic / span * 7 : null; // 기록이 2주 이상일 때만 비교
   const x = day(date), px = day(addDays(date, -1));
-  return { y, consec, lastHardFinger, acute, ratio: base ? acute / base : null, pain: !!(x.finger || px.finger), elbow: !!(x.elbow || px.elbow), weak: !!x.weak };
+  // 통증 정도: 오늘과 어제 중 심한 쪽. 조금(1)은 고강도만 막고, 중간(2) 이상은 손가락 운동을 막음
+  const painLv = Math.max(lvOf(x.finger), lvOf(px.finger)), elbowLv = Math.max(lvOf(x.elbow), lvOf(px.elbow));
+  return { y, consec, lastHardFinger, acute, ratio: base ? acute / base : null, painLv, pain: painLv >= 2, painMild: painLv === 1, elbowLv, elbow: elbowLv >= 2, weak: !!x.weak };
 }
 
 // ---------- 컨디션 점수 0~100 ----------
@@ -35,12 +37,12 @@ function readiness(date) {
   let sc = 100;
   const hit = (n, t) => { if (n > 0) { sc -= n; why.push(t); } };
   if (isNum(x.sleep)) hit(x.sleep < 5 ? 25 : x.sleep < 6 ? 15 : x.sleep < 7 ? 6 : 0, `수면 ${x.sleep}시간`);
-  if (x.finger) hit(30, '손가락 통증');
-  if (x.elbow) hit(20, '팔꿈치 통증');
-  if (x.sore) hit(10, '근육통');
+  const PI = PLAN.pain.items;
+  ['finger', 'elbow', 'sore'].forEach(k => { const l = lvOf(x[k]); if (l) hit(PI[k].score[l - 1], `${PI[k].t} ${lvName(l)}`); });
   if (x.weak) hit(15, '힘 떨어짐');
-  if (x.sick) hit(45, '아픔');
-  else if (day(addDays(date, -1)).sick) hit(15, '어제 아픔');
+  const sl = lvOf(x.sick), ysl = lvOf(day(addDays(date, -1)).sick);
+  if (sl) hit(PI.sick.score[sl - 1], `아픔 ${lvName(sl)}`);
+  else if (ysl) hit(PI.sick.yScore[ysl - 1], `어제 아픔 ${lvName(ysl)}`);
   if (rc.y) hit(Math.min(25, Math.round(rc.y.au / 60)), `어제 ${S(rc.y.id).short} ${rc.y.min}분·RPE ${rc.y.rpe}`);
   if (rc.consec >= 2) hit((rc.consec - 1) * 5, `${rc.consec}일 연속 운동`);
   if (rc.ratio && rc.acute >= RC().acwrMinLoad) hit(rc.ratio > RC().acwrMax ? 20 : rc.ratio > 1.3 ? 10 : 0, `7일 부하 평소의 ${rc.ratio.toFixed(1)}배`);
@@ -78,16 +80,20 @@ function recommend(date) {
   const yClimb = !!(y && S(y.id).gym);
   const fingerOk = !rc.pain && !(y && y.finger && (y.hard || rc.consec >= 2)) && !(T.noBackToBackClimb && yClimb);
   const ySick = !!day(addDays(date, -1)).sick;
-  const canHigh = !ySick && fingerOk && rd.score >= R.readyHigh && !tHigh && !(rc.lastHardFinger && rc.lastHardFinger < R.highGapDays) && !(y && y.hard);
+  const canHigh = !ySick && !rc.painMild && fingerOk && rd.score >= R.readyHigh && !tHigh && !(rc.lastHardFinger && rc.lastHardFinger < R.highGapDays) && !(y && y.hard);
   const has = id => remaining.includes(slotOf(id));
   const allowed = id => has(id) && (!isHigh(id) || canHigh) && (!usesFingers(id) || fingerOk);
   const pickFrom = list => list.find(allowed);
   let id, why;
-  if (day(date).sick) {
-    id = 'rest'; why = '아픈 날 → 오늘은 완전 휴식. 물을 충분히 드세요';
+  const sickLv = lvOf(day(date).sick);
+  if (sickLv >= 2) {
+    id = 'rest'; why = `아픔(${lvName(sickLv)}) → 오늘은 완전 휴식. 물을 충분히 드세요`;
+  } else if (sickLv === 1) {
+    id = pickFrom(['homeB', 'homeA', 'volume']) || 'rest';
+    why = '가벼운 증상(조금) → 고강도는 쉬고 ' + (id === 'rest' ? '휴식' : `${S(id).short}로 가볍게`) + '. 하다가 열·몸살이 오면 바로 중단';
   } else if (rc.pain) {
-    id = pickFrom(['homeB']) || 'rest';
-    why = '손가락 통증 기록 → 손가락 쓰는 운동은 쉬고 ' + (id === 'rest' ? '휴식' : '코어·모빌리티만');
+    id = pickFrom(rc.painLv >= 3 ? ['homeB'] : ['homeB', 'homeA']) || 'rest';
+    why = `손가락 통증(${lvName(rc.painLv)}) → 손가락 쓰는 운동은 쉬고 ` + (id === 'rest' ? '휴식' : id === 'homeB' ? '코어·모빌리티만' : S(id).short) + (rc.painLv >= 3 ? '. 3일 넘게 가면 진료를 받으세요' : '');
   } else if (!remaining.length) {
     id = 'rest'; why = busy ? '바쁜 주 필수 세션(한계·볼륨)을 다 채웠습니다' : '이번 주 세션을 다 채웠습니다 · 회복';
   } else if (rc.consec >= R.consecRest) {
@@ -117,6 +123,7 @@ function recommend(date) {
   if (id === 'limit' && sleepBad && has('volume')) { id = 'volume'; why = '수면 부족이 잦음 → 한계 대신 볼륨'; }
   if (id === 'limit' && rc.weak && has('volume')) { id = 'volume'; why = '오늘 힘 떨어짐 → 한계 대신 볼륨'; }
   if (id === 'limit' && T.noLimitWeek1 && weekNo(date) <= 1 && has('volume')) { id = 'volume'; why = '복귀 1주차 → 한계 대신 볼륨으로 감 되찾기'; }
+  if (rc.painMild && usesFingers(id) && !sickLv) why += ' · 손가락 조금 아픔: 쉬운 문제 위주, 크림프 피하기, 통증이 늘면 중단';
   return { id, why, status: recLine(rc), rc, rd, remaining, busy, canHigh, fingerOk, yHigh, tHigh, slack, free };
 }
 

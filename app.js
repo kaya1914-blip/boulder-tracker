@@ -27,6 +27,7 @@ function normalize(s) {
   s.meta = isObj(s.meta) ? s.meta : {};
   s.timer = isObj(s.timer) ? s.timer : {};
   if (s.inbody && !Array.isArray(s.inbody)) s.inbody = [];
+  if (s.cafe != null && !isObj(s.cafe)) s.cafe = {};
   return s;
 }
 function load() {
@@ -60,6 +61,16 @@ const durText = sec => (sec >= 60 ? (sec % 60 ? mmss(sec) : `${sec / 60}분`) : 
 
 // ---------- 공통 ----------
 const isNum = v => typeof v === 'number' && isFinite(v);
+// 몸 상태 정도: 0 없음 · 1 조금 · 2 중간 · 3 많이 (예전 기록의 true = 2 중간)
+const lvOf = v => (v === true ? 2 : isNum(v) ? Math.max(0, Math.min(3, Math.round(v))) : 0);
+const lvName = l => PLAN.pain.levels[l - 1] || '';
+// 기록·리포트용 몸 상태 글: "손가락 통증(중간), 힘 떨어짐"
+function bodyBits(x) {
+  const out = [];
+  ['finger', 'elbow', 'sore', 'sick'].forEach(k => { const l = lvOf(x[k]); if (l) out.push(`${k === 'sick' ? '아픔' : PLAN.pain.items[k].t}(${lvName(l)})`); });
+  if (x.weak) out.splice(Math.min(out.length, 2), 0, '힘 떨어짐');
+  return out;
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const day = s => state.days[s] || {};
 const dayW = s => (state.days[s] = state.days[s] || {});
@@ -198,7 +209,7 @@ function autoTargets(date) {
   return { rest: r50(rest), gym: r50(gym), protein: Math.round((w * m.proteinPerKg[g]) / 5) * 5, bmr: !!bmr, src, bmrVal: bmr && Math.round(bmr) };
 }
 function targets(date) {
-  const s = state.settings, a = autoTargets(date) || { gym: PLAN.meals.refKcal.gym, rest: PLAN.meals.refKcal.rest, protein: 100, bmr: false, none: true };
+  const s = state.settings, a = autoTargets(date) || { gym: PLAN.meals.fallbackKcal.gym, rest: PLAN.meals.fallbackKcal.rest, protein: 100, bmr: false, none: true };
   return { gym: isNum(s.kcalGym) ? s.kcalGym : a.gym, rest: isNum(s.kcalRest) ? s.kcalRest : a.rest, protein: isNum(s.protein) ? s.protein : a.protein, auto: a };
 }
 
@@ -226,11 +237,12 @@ function avgWeightAround(date) {
 // ---------- 몸 상태 ----------
 function liveFlags(date) {
   const mon = mondayOf(date);
-  let fingerWeek = false, elbow7 = false, short = 0;
-  for (let d = mon; d <= date; d = addDays(d, 1)) if (day(d).finger) fingerWeek = true;
+  // fingerWeek·elbow7: 그 기간 가장 심했던 정도 (0~3)
+  let fingerWeek = 0, elbow7 = 0, short = 0;
+  for (let d = mon; d <= date; d = addDays(d, 1)) fingerWeek = Math.max(fingerWeek, lvOf(day(d).finger));
   for (let i = 0; i < 7; i++) {
     const x = day(addDays(date, -i));
-    if (x.elbow) elbow7 = true;
+    elbow7 = Math.max(elbow7, lvOf(x.elbow));
     if (isNum(x.sleep) && x.sleep < state.settings.shortSleepH) short++;
   }
   return { fingerWeek, elbow7, short };
@@ -242,6 +254,7 @@ function hangFor(date) {
   let lvl = cfg.hang;
   const why = [];
   if (weekStats(addDays(mon, -7)).finger) why.push('지난주 손가락 통증');
+  if (date >= mon && liveFlags(date).fingerWeek === 1) why.push('이번 주 손가락 통증 조금');
   if (state.weeks[mon] && state.weeks[mon].hold) why.push('강도 유지 선택');
   if (TR().easyWeeks && w <= TR().easyWeeks) why.push('복귀 초기');
   if (why.length) lvl--; // 사유가 겹쳐도 한 단계만 낮춤
@@ -337,13 +350,14 @@ function getSteps(sid, date) {
     }
     if (st.tag === 'hang') {
       if (hang.skip) o.skip = hang.skip;
-      else if (f.fingerWeek) o.skip = '이번 주 손가락 통증 기록 → 행보드 제외';
+      else if (f.fingerWeek >= 2) o.skip = `이번 주 손가락 통증(${lvName(f.fingerWeek)}) → 행보드 제외`;
     }
-    if (st.tag === 'pull' && f.elbow7) o.skip = '최근 7일 팔꿈치 통증 → 중단';
+    if (st.tag === 'pull' && f.elbow7 >= 2) o.skip = `최근 7일 팔꿈치 통증(${lvName(f.elbow7)}) → 중단`;
+    else if (st.tag === 'pull' && f.elbow7 === 1) o.note = '팔꿈치 조금 · 1세트 줄여 통증 없는 범위만';
     if (o.skip) o.tm = null;
     return o;
   }).filter(Boolean);
-  if ((sid === 'limit' || sid === 'volume') && compensationDay(date) && !hang.skip && !f.fingerWeek) {
+  if ((sid === 'limit' || sid === 'volume') && compensationDay(date) && !hang.skip && f.fingerWeek < 2) {
     list.splice(1, 0, { id: 'hc', t: '행보드 보충 3세트', d: `집 C로 대체한 근력 세션분 · ${tier().grip} · ${hang.text}`, tag: 'hang', note: '보충', tm: { kind: 'hang', sets: 3 } });
   }
   return list;
@@ -394,10 +408,11 @@ function weekStats(mon) {
     whites: ds.filter(([, x]) => x.white).map(([d, x]) => [d, x.white]),
     hangs: ds.filter(([, x]) => x.hang || x.pull).map(([d, x]) => [d, x.hang, x.pull]),
     hangLogs: ds.flatMap(([d, x]) => (x.hangLog || []).map(l => [d, l])),
-    finger: ds.some(([, x]) => x.finger),
-    elbow: ds.some(([, x]) => x.elbow),
+    finger: Math.max(0, ...ds.map(([, x]) => lvOf(x.finger))), // 그 주 가장 심했던 정도 0~3
+    elbow: Math.max(0, ...ds.map(([, x]) => lvOf(x.elbow))),
     weak: ds.filter(([, x]) => x.weak).length,
     sick: ds.filter(([, x]) => x.sick).map(([d]) => d),
+    sickLv: Object.fromEntries(ds.filter(([, x]) => x.sick).map(([d, x]) => [d, lvOf(x.sick)])),
     short: ds.filter(([, x]) => isNum(x.sleep) && x.sleep < st.shortSleepH).length,
     busy: !!(state.weeks[mon] && state.weeks[mon].busy),
     consec,
@@ -432,35 +447,35 @@ function verdict(mon) {
     } else if (goal === 'keep') {
       if (Math.abs(diff) > st.fastLossKg) {
         if (diff < 0) flags.fast = true;
-        cards.push({ lv: 'warn', icon: 'scale', t: diff < 0 ? '체중이 빠지는 중' : '체중이 느는 중', b: `${line}. 유지가 목표라 ${diff < 0 ? '다음 주 운동 전에 간식을 더합니다.' : '간식·야식을 줄입니다.'}` });
+        cards.push({ lv: 'warn', icon: 'scale', t: diff < 0 ? '체중이 빠지는 중' : '체중이 느는 중', b: `${line}. 유지가 목표라 ${diff < 0 ? '다음 주 암장 날 운동 중 마실 것(우유·두유)을 더합니다.' : '간식·야식을 줄입니다.'}` });
       } else cards.push({ lv: 'ok', icon: 'scale', t: '체중 유지 중', b: `${line}. 계획대로 진행합니다.` });
     } else if (diff > -st.plateauKg) {
       flags.plateau = true;
       cards.push({ lv: 'warn', icon: 'scale', t: '체중 정체', b: `${line}. 다음 주 쉬는 날은 끼니마다 밥 0.5공기를 더 줄입니다.` });
     } else if (-diff > st.fastLossKg) {
       flags.fast = true;
-      cards.push({ lv: 'warn', icon: 'scale', t: '감량이 너무 빠름', b: `${line}. 다음 주 암장 날 운동 전에 식빵 1장 또는 김밥 1줄을 추가합니다.` });
+      cards.push({ lv: 'warn', icon: 'scale', t: '감량이 너무 빠름', b: `${line}. 다음 주 암장 날은 점심 밥을 남기지 말고, 운동 중 바나나우유·초코우유 1팩을 더합니다.` });
     } else {
       cards.push({ lv: 'ok', icon: 'scale', t: '체중 순조', b: `${line}. 계획대로 진행합니다.` });
     }
   }
   if (s.weak) {
     flags.fast = true;
-    cards.push({ lv: 'warn', icon: 'battery', t: `암장에서 힘 떨어짐 ${s.weak}회`, b: '다음 주 암장 날 운동 전에 식빵 1장 또는 김밥 1줄을 추가합니다.' });
+    cards.push({ lv: 'warn', icon: 'battery', t: `암장에서 힘 떨어짐 ${s.weak}회`, b: '다음 주 암장 날은 점심 밥을 남기지 말고, 운동 중 바나나우유·초코우유 1팩을 더합니다. 운동 전 간식은 못 먹어도 괜찮습니다.' });
   }
   if (s.finger) {
     flags.finger = true;
-    cards.push({ lv: 'warn', icon: 'finger', t: '손가락 통증 기록', b: '다음 주 행보드를 한 단계 낮춥니다(자동 반영). 크림프 위주 문제는 피하세요.' });
+    cards.push({ lv: 'warn', icon: 'finger', t: `손가락 통증 기록 · 가장 심할 때 ${lvName(s.finger)}`, b: s.finger >= 3 ? '많이 아픈 날이 있었습니다. 통증이 사라질 때까지 행보드·한계 세션은 쉬고, 3일 넘게 가거나 붓기·딸깍 소리가 있었다면 정형외과(스포츠의학) 진료를 받으세요. 다음 주 행보드는 한 단계 낮춥니다.' : '다음 주 행보드를 한 단계 낮춥니다(자동 반영). 크림프 위주 문제는 피하세요.' });
   }
   if (s.elbow) {
     flags.elbow = true;
-    cards.push({ lv: 'warn', icon: 'alert', t: '팔꿈치 통증 기록', b: '통증을 기록한 날부터 7일간 풀업·록오프를 자동으로 뺍니다. 손목 운동은 가볍게 유지하세요.' });
+    cards.push({ lv: 'warn', icon: 'alert', t: `팔꿈치 통증 기록 · 가장 심할 때 ${lvName(s.elbow)}`, b: s.elbow >= 2 ? '통증을 기록한 날부터 7일간 풀업·록오프를 자동으로 뺍니다. 손목 운동은 가볍게 유지하세요.' : '조금 수준이라 풀업·록오프는 1세트 줄여 통증 없는 범위에서만 합니다. 중간 이상이 되면 7일간 자동으로 뺍니다.' });
   }
   if (s.short >= st.shortSleepDays) {
     flags.sleep = true;
     cards.push({ lv: 'warn', icon: 'moon', t: `수면 ${st.shortSleepH}시간 미만 ${s.short}일`, b: '다음 주에는 한계 세션 대신 볼륨 세션을 추천합니다.' });
   }
-  if (s.sick.length) cards.push({ lv: 'info', icon: 'moon', t: `아픈 날 ${s.sick.length}일`, b: `${s.sick.map(md).join(', ')}. 아픈 날과 다음 날은 고강도를 추천하지 않습니다. 다 나은 뒤 첫 세션은 평소보다 한 단계 가볍게 하세요.` });
+  if (s.sick.length) cards.push({ lv: 'info', icon: 'moon', t: `아픈 날 ${s.sick.length}일`, b: `${s.sick.map(d => `${md(d)}(${lvName(s.sickLv[d])})`).join(', ')}. 아픈 날과 다음 날은 고강도를 추천하지 않습니다(조금은 가벼운 운동까지, 중간 이상은 휴식). 다 나은 뒤 첫 세션은 평소보다 한 단계 가볍게 하세요.` });
   if (s.consec) cards.push({ lv: 'warn', icon: 'bolt', t: `고강도 연속 ${s.consec}회`, b: '한계·근력(집 C 포함)은 하루 이상 띄우세요. 손가락 인대 회복에 필요합니다.' });
   if (s.busy || (ended && s.gymDone <= 2)) {
     cards.push({ lv: 'info', icon: 'stack', t: `암장 ${s.gymDone}회 · 바쁜 주`, b: '다음 주도 바쁘면 오늘 화면에서 "바쁜 주"를 켜세요. 한계와 볼륨만 추천합니다.' });
@@ -480,14 +495,16 @@ function verdict(mon) {
     if (dt.logged < 3) {
       if (ended || dt.logged) cards.push({ lv: 'info', icon: 'info', t: '식단 판정 보류', b: `식단을 적은 날이 ${dt.logged}일입니다. 3일 이상 적으면 단백질·칼로리를 판정합니다.` });
     } else {
-      const pp = dt.p / tg.protein;
-      if (pp < 0.8) {
+      const pp = dt.p / tg.protein, warnAt = PLAN.meals.proteinWarn;
+      if (pp < warnAt) {
         flags.protein = Math.round(dt.p);
-        cards.push({ lv: 'warn', icon: 'alert', t: `단백질 부족 · 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g`, b: `목표의 ${Math.round(pp * 100)}%입니다. 감량 중 단백질이 모자라면 근육과 손가락 힘이 같이 빠집니다. 다음 주는 끼니마다 단백질 반찬(계란·두부·닭가슴살·생선)을 하나씩 더하고, 운동 직후 단백질 음료를 챙기세요.${note}` });
+        // 한 번에 목표까지 올리지 않고 지난주 평균 + 20g씩 단계적으로
+        flags.proteinStep = Math.min(tg.protein, Math.round((dt.p + PLAN.meals.proteinStep) / 5) * 5);
+        cards.push({ lv: 'warn', icon: 'alert', t: `단백질 부족 · 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g`, b: `목표의 ${Math.round(pp * 100)}%입니다. 한 번에 다 채우려 하지 말고 다음 주는 ${flags.proteinStep}g부터 갑니다. 아침 계란 2개(+12g)와 운동 직후 단백질 음료나 두유(+7~20g)만 지켜도 하루 20~30g이 늘어납니다.${note}` });
       }
       const kp = dt.nGym ? dt.kGym / tg.gym : null;
-      if (isNum(kp) && kp < 0.85) cards.push({ lv: 'warn', icon: 'bolt', t: `암장 날 칼로리 부족 · 평균 ${Math.round(dt.kGym).toLocaleString()} / ${tg.gym.toLocaleString()}kcal`, b: `목표의 ${Math.round(kp * 100)}%입니다. 운동하는 날 너무 적게 먹으면 회복이 늦고 다음 세션 힘이 떨어집니다. 운동 전후 간식(바나나·단백질 음료)부터 챙기세요.${note}` });
-      if (pp >= 0.8 && !(isNum(kp) && kp < 0.85)) cards.push({ lv: 'ok', icon: 'check', t: '식단 순조', b: `단백질 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g${isNum(kp) ? ` · 암장 날 ${Math.round(dt.kGym).toLocaleString()}kcal` : ''}.${note}` });
+      if (isNum(kp) && kp < 0.85) cards.push({ lv: 'warn', icon: 'bolt', t: `암장 날 칼로리 부족 · 평균 ${Math.round(dt.kGym).toLocaleString()} / ${tg.gym.toLocaleString()}kcal`, b: `목표의 ${Math.round(kp * 100)}%입니다. 운동하는 날 너무 적게 먹으면 회복이 늦고 다음 세션 힘이 떨어집니다. 운동 전 간식은 어려우면 생략하고, 점심 밥 남기지 않기 · 운동 중 스포츠음료나 두유 · 운동 직후 단백질 음료부터 챙기세요.${note}` });
+      if (pp >= warnAt && !(isNum(kp) && kp < 0.85)) cards.push({ lv: 'ok', icon: 'check', t: '식단 순조', b: `단백질 평균 ${Math.round(dt.p)}g / 목표 ${tg.protein}g${isNum(kp) ? ` · 암장 날 ${Math.round(dt.kGym).toLocaleString()}kcal` : ''}.${note}` });
     }
   }
   const os = overrideStats(addDays(mon, 6));
@@ -645,6 +662,19 @@ function toggleChip(date, k, label, icon) {
   const on = !!day(date)[k];
   return `<button class="chipbtn ${on ? 'on' : ''}" data-act="flag" data-date="${date}" data-k="${k}" aria-pressed="${on}">${ic(icon)}${label}</button>`;
 }
+// 정도가 있는 몸 상태: 누르면 '조금'으로 켜지고, 아래 줄에서 조금·중간·많이를 고름. 다시 누르면 끔
+function painChip(date, k) {
+  const it = PLAN.pain.items[k], l = lvOf(day(date)[k]);
+  return `<button class="chipbtn ${l ? 'on' : ''}" data-act="flag" data-date="${date}" data-k="${k}" aria-pressed="${!!l}">${ic(it.icon)}${it.t}${l ? ` · ${lvName(l)}` : ''}</button>`;
+}
+function painLevels(date) {
+  const x = day(date);
+  const rows = Object.entries(PLAN.pain.items).filter(([k]) => lvOf(x[k])).map(([k, it]) => {
+    const l = lvOf(x[k]);
+    return `<div class="plv"><div class="plv-h"><b>${it.t}</b><div class="seg plv-seg" role="group" aria-label="${it.t} 정도">${[1, 2, 3].map(v => `<button class="${l === v ? 'on' : ''}" data-act="plv" data-date="${date}" data-k="${k}" data-v="${v}" aria-pressed="${l === v}">${lvName(v)}</button>`).join('')}</div></div><small>${it.d[l - 1]}</small></div>`;
+  });
+  return rows.length ? `<div class="plvs">${rows.join('')}</div>` : '';
+}
 function bigStepper(date, k, label, unit, step, ph) {
   const v = day(date)[k];
   return `<div class="metric">
@@ -668,9 +698,10 @@ function morningCard(date) {
       ${bigStepper(date, 'weight', '체중', 'kg', 0.1, lw != null ? String(lw) : '—')}
       ${bigStepper(date, 'sleep', '수면', '시간', 0.5, '—')}
     </div>
-    <div class="chips">${toggleChip(date, 'finger', '손가락 통증', 'finger')}${toggleChip(date, 'elbow', '팔꿈치 통증', 'alert')}${toggleChip(date, 'sore', '근육통', 'leaf')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}${toggleChip(date, 'sick', '아픔 (감기·장염 등)', 'moon')}</div>
-    ${x.sick ? `<p class="warn">${ic('moon')}아픈 날은 운동을 쉬고 물을 충분히 드세요. 열이 나거나 3일 넘게 낫지 않으면 진료를 받으세요.</p>` : ''}
-    ${x.finger || x.elbow ? `<p class="warn">${ic('alert')}통증이 3일 넘게 가거나, 붓기·딸깍 소리·힘이 갑자기 빠지는 느낌이 있으면 운동을 멈추고 정형외과(스포츠의학) 진료를 받으세요. 이 앱의 추천은 의학적 진단이 아닙니다.</p>` : ''}
+    <div class="chips">${painChip(date, 'finger')}${painChip(date, 'elbow')}${painChip(date, 'sore')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}${painChip(date, 'sick')}</div>
+    ${painLevels(date)}
+    ${lvOf(x.sick) === 1 ? `<p class="warn">${ic('moon')}가벼운 증상이면 고강도만 쉬고 가볍게 움직여도 됩니다. 열·몸살이 오면 바로 쉬세요.</p>` : lvOf(x.sick) >= 2 ? `<p class="warn">${ic('moon')}아픈 날은 운동을 쉬고 물을 충분히 드세요. 열이 나거나 3일 넘게 낫지 않으면 진료를 받으세요.</p>` : ''}
+    ${lvOf(x.finger) >= 2 || lvOf(x.elbow) >= 2 ? `<p class="warn">${ic('alert')}통증이 3일 넘게 가거나, 붓기·딸깍 소리·힘이 갑자기 빠지는 느낌이 있으면 운동을 멈추고 정형외과(스포츠의학) 진료를 받으세요. 이 앱의 추천은 의학적 진단이 아닙니다.</p>` : ''}
   </section>`;
 }
 
@@ -915,7 +946,7 @@ function viewRecord() {
     </section>` +
     `<section class="card"><div class="card-h"><h2>최근 기록</h2><span class="muted">${hist.length}일</span></div>${hist.length ? `<ul class="hist">${hist.map(k => {
       const y = state.days[k], s = S(y.session);
-      const bits = [isNum(y.brown) ? '완등 ' + y.brown : '', y.white ? '한계 ' + esc(y.white) : '', y.hang ? esc(y.hang) : '', y.pull ? '풀업 ' + esc(y.pull) : '', (y.hangLog || []).length ? '행보드 타이머 ' + y.hangLog.length + '회' : '', y.finger ? '손가락 통증' : '', y.elbow ? '팔꿈치 통증' : ''].filter(Boolean).join(' · ');
+      const bits = [isNum(y.brown) ? '완등 ' + y.brown : '', y.white ? '한계 ' + esc(y.white) : '', y.hang ? esc(y.hang) : '', y.pull ? '풀업 ' + esc(y.pull) : '', (y.hangLog || []).length ? '행보드 타이머 ' + y.hangLog.length + '회' : '', ...bodyBits(y).filter(t => !/^(힘|근육)/.test(t))].filter(Boolean).join(' · ');
       return `<li><button data-act="goto" data-target="record" data-date="${k}">
         <span class="h-d"><b>${parse(k).getDate()}</b><small>${DOW[dow(k)]}</small></span>
         <span class="h-mid"><span class="h-s ${s ? 'i-' + s.intensity : ''}">${s ? s.short : '기록'}</span><span class="h-b">${bits || '&nbsp;'}</span></span>
@@ -949,7 +980,7 @@ function viewWeek() {
     `<section class="card"><div class="card-h"><h2>이번 주 기록</h2></div>
       <h3 class="h3">한계 문제 도달 홀드</h3>${s.whites.length ? `<ul class="plain">${s.whites.map(([d, t]) => `<li><span>${md(d)} ${DOW[dow(d)]}</span>${esc(t)}</li>`).join('')}</ul>` : '<p class="hint">기록 없음</p>'}
       <h3 class="h3">행보드 · 풀업</h3>${s.hangs.length || s.hangLogs.length ? `<ul class="plain">${s.hangs.map(([d, h, p]) => `<li><span>${md(d)} ${DOW[dow(d)]}</span>${esc(h || '-')} · 풀업 ${esc(p || '-')}</li>`).join('')}${s.hangLogs.map(([d, l]) => `<li><span>${md(d)} ${DOW[dow(d)]}</span>타이머 ${esc(l.title)} ${l.setsDone}/${l.sets}세트</li>`).join('')}</ul>` : '<p class="hint">기록 없음</p>'}
-      <h3 class="h3">몸 상태</h3><p class="hint">손가락 통증 ${s.finger ? '있음' : '없음'} · 팔꿈치 통증 ${s.elbow ? '있음' : '없음'} · 힘 떨어짐 ${s.weak}회 · 수면 부족 ${s.short}일 · 고강도 연속 ${s.consec}회</p>
+      <h3 class="h3">몸 상태</h3><p class="hint">손가락 통증 ${s.finger ? lvName(s.finger) : '없음'} · 팔꿈치 통증 ${s.elbow ? lvName(s.elbow) : '없음'} · 아픈 날 ${s.sick.length}일 · 힘 떨어짐 ${s.weak}회 · 수면 부족 ${s.short}일 · 고강도 연속 ${s.consec}회</p>
       <button class="chipbtn ${s.busy ? 'on' : ''}" data-act="busy" data-mon="${mon}" aria-pressed="${s.busy}">${ic('stack')}이번 주는 바쁜 주</button>
     </section>`;
 }
@@ -1006,7 +1037,7 @@ function buildReport(mon) {
     const x = day(d), ss = S(x.session);
     let stp = '-';
     if (ss && x.session !== 'rest') { const sp = getSteps(x.session, d).filter(z => !z.skip); stp = `${sp.filter(z => (x.checks || {})[z.id]).length}/${sp.length}`; }
-    const body = [x.finger ? '손가락 통증' : '', x.elbow ? '팔꿈치 통증' : '', x.weak ? '힘 떨어짐' : '', x.sick ? '아픔' : ''].filter(Boolean).join(', ') || '-';
+    const body = bodyBits(x).join(', ') || '-';
     const climb = [isNum(x.brown) ? `볼륨 완등 ${x.brown}` : '', x.white ? `한계 문제 도달: ${x.white}` : '', x.hang ? `행보드 ${x.hang}` : '', x.pull ? `풀업 ${x.pull}` : '', ...(x.hangLog || []).map(l => `타이머 ${l.title} ${l.setsDone}/${l.sets}세트 ${l.work}초 ${l.board ? l.board + ' ' : ''}${l.grip || ''}${l.load ? ' ' + l.load : ''}`)].filter(Boolean).join(' · ') || '-';
     let meal = '-';
     { const t = foodTotals(d); if (t.n) meal = `${t.n}개 음식 · ${Math.round(t.k)}kcal · 단백질 ${Math.round(t.p)}g${t.names ? ' (' + t.names + ')' : ''}`; }
@@ -1031,7 +1062,7 @@ function buildReport(mon) {
   L.push('|---|---|---|---|---|---|---|');
   for (let k = 3; k >= 0; k--) {
     const m = addDays(mon, -7 * k), ws = weekStats(m), wn = weekNo(m);
-    L.push(`| ${wn < 1 ? '준비' : wn + '주'} | ${md(m)}~${md(addDays(m, 6))} | ${f1(ws.avg)} | ${ws.gymDone} | ${ws.brownMax ?? '-'} | ${[ws.finger ? '손가락' : '', ws.elbow ? '팔꿈치' : '', ws.sick.length ? `아픔 ${ws.sick.length}일` : ''].filter(Boolean).join(',') || '-'} | ${ws.short}일 |`);
+    L.push(`| ${wn < 1 ? '준비' : wn + '주'} | ${md(m)}~${md(addDays(m, 6))} | ${f1(ws.avg)} | ${ws.gymDone} | ${ws.brownMax ?? '-'} | ${[ws.finger ? `손가락(${lvName(ws.finger)})` : '', ws.elbow ? `팔꿈치(${lvName(ws.elbow)})` : '', ws.sick.length ? `아픔 ${ws.sick.length}일` : ''].filter(Boolean).join(',') || '-'} | ${ws.short}일 |`);
   }
   L.push('');
   L.push(`(생성: ${todayStr()} · 볼더링 트래커)`);
@@ -1109,6 +1140,7 @@ function viewSettings() {
       </div>
       <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? `기초대사량 ${a.bmrVal}kcal(${{ inbody: '인바디 측정값', fat: '인바디 체지방률 · 제지방량 기준', mifflin: '성별·나이·키·최근 7일 체중' }[a.src]}) × 활동량` + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>
     </section>
+    ${cafeCard()}
     <section class="card"><div class="card-h"><h2>백업</h2><span class="muted">마지막 ${lb ? md(lb) : '없음'}</span></div>
       <p class="hint">브라우저 데이터를 지우면 기록이 사라집니다. 주 1회 내보내기를 권합니다.</p>
       <div class="btn-row">
@@ -1127,9 +1159,10 @@ function viewSettings() {
     </section>
     <section class="card"><div class="card-h"><h2>자동 조정 규칙</h2></div><ul class="plain rules">
       ${goalOf() === 'gain' ? `<li>주 평균 체중이 ${st.plateauKg}kg 미만으로 늘면 → 다음 주 끼니마다 밥 0.5공기 추가</li>` : goalOf() === 'cut' ? `<li>주 평균 체중 정체 → 다음 주 쉬는 날 밥 끼니당 0.5공기 감소</li>` : `<li>주 평균 체중이 ${st.fastLossKg}kg 넘게 변하면 알림</li>`}
-      <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 운동 전 식빵 1장/김밥 1줄</li>
-      <li>손가락 통증 → 그 주 행보드 제외, 다음 주 한 단계 후퇴</li>
-      <li>팔꿈치 통증 → 7일간 풀업·록오프 제외</li>
+      <li>${goalOf() === 'cut' ? `주 ${st.fastLossKg}kg 초과 감량 또는 ` : ''}힘 떨어짐 → 다음 주 암장 날 점심 밥 남기지 않기 + 운동 중 우유·두유 1팩</li>
+      <li>손가락 통증 조금 → 고강도만 쉬고 행보드 한 단계 낮춤 · 중간 이상 → 손가락 운동 쉬고 그 주 행보드 제외, 다음 주 한 단계 후퇴</li>
+      <li>팔꿈치 통증 조금 → 풀업·록오프 1세트 줄임 · 중간 이상 → 7일간 제외</li>
+      <li>아픔 조금 → 고강도만 쉬고 가볍게 · 중간 이상 → 휴식</li>
       <li>바쁜 주 → 한계+볼륨만</li>
       <li>수면 ${st.shortSleepH}시간 미만 ${st.shortSleepDays}일 이상 → 한계 대신 볼륨</li>
       <li>근력 세션을 집 C로 대체 → 다음 암장 날 행보드 보충 3세트</li>
@@ -1230,7 +1263,13 @@ document.addEventListener('click', e => {
     case 'prep-reset': if (confirm('이번 주 준비·장보기 목록을 처음 상태로 되돌릴까요?')) { delete state.prepList; return commit(); } return;
     case 'prep': { const pc = prepChecks(d, true); pc[b.dataset.id] = !pc[b.dataset.id]; return commit(); }
     case 'time': dayW(d).time = b.dataset.v; return commit();
-    case 'flag': { const x = dayW(d); x[b.dataset.k] = !x[b.dataset.k]; return commit(); }
+    case 'flag': {
+      const x = dayW(d), k = b.dataset.k;
+      if (PLAN.pain.items[k]) { if (lvOf(x[k])) delete x[k]; else x[k] = 1; } // 정도가 있는 항목: 처음 누르면 '조금'
+      else x[k] = !x[k];
+      return commit();
+    }
+    case 'plv': { dayW(d)[b.dataset.k] = +b.dataset.v; return commit(); }
     case 'adj': {
       const x = dayW(d), k = b.dataset.k, step = +b.dataset.step;
       // 비어 있을 때 처음 누르면 기준값(전날 체중 / 수면 7시간)을 그대로 채움

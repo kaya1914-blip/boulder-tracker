@@ -33,6 +33,7 @@
     state = normalize({ v: 1, settings: Object.assign({ level: 4, track: 'up', startDate: '2026-11-02', sex: 'm', age: 30, heightCm: 172 }, settings), days: JSON.parse(JSON.stringify(days)), weeks: {}, meta: {}, timer: {} });
   }
   const NON_FINGER = ['homeA', 'homeB', 'rest'];
+  let vd;
 
   scene({ '2026-11-14': { session: 'rest' }, '2026-11-15': { session: 'volume', dur: 180, rpe: 8.5 } });
   let r = recommend('2026-11-16');
@@ -42,7 +43,28 @@
 
   scene({ '2026-11-16': { finger: true } });
   r = recommend('2026-11-16');
-  check('손가락 통증 → homeB 또는 휴식', ['homeB', 'rest'].includes(r.id), r.id);
+  check('손가락 통증(예전 기록 true = 중간) → 손가락 안 쓰는 운동/휴식', NON_FINGER.includes(r.id), r.id);
+
+  // 몸 상태 정도: 조금 · 중간 · 많이
+  check('예전 기록 true는 중간(2)', lvOf(true) === 2 && lvOf(undefined) === 0 && lvOf(3) === 3);
+  scene({ '2026-11-16': { finger: 1 } });
+  r = recommend('2026-11-16');
+  check('손가락 조금 → 고강도는 막고 볼륨은 가능 + 주의 문구', r.id === 'volume' && /손가락 조금/.test(r.why), r.id + ' · ' + r.why);
+  scene({ '2026-11-16': { finger: 3 } });
+  r = recommend('2026-11-16');
+  check('손가락 많이 → 코어·모빌리티 또는 휴식 + 진료 안내', ['homeB', 'rest'].includes(r.id) && /진료/.test(r.why), r.id + ' · ' + r.why);
+  const sc = l => { scene({ '2026-11-16': { finger: l } }); return readiness('2026-11-16').score; };
+  check('통증이 심할수록 컨디션 점수 낮음', sc(1) > sc(2) && sc(2) > sc(3), [sc(1), sc(2), sc(3)].join(' > '));
+  scene({ '2026-11-16': { sick: 1 } });
+  r = recommend('2026-11-16');
+  check('아픔 조금 → 휴식 강제 아님 · 고강도 아님', r.id !== 'rest' && !isHigh(r.id), r.id + ' · ' + r.why);
+  scene({ '2026-11-16': { sick: 3 } });
+  check('아픔 많이 → 휴식', recommend('2026-11-16').id === 'rest');
+  scene({ '2026-11-16': { finger: 1 }, '2026-11-17': { finger: 3, elbow: 1 } }, { startDate: '2026-11-16' });
+  vd = verdict('2026-11-16');
+  check('주간 판정: 가장 심한 정도 · 많이면 진료 안내', vd.cards.some(c => /손가락 통증 기록 · 가장 심할 때 많이/.test(c.t) && /진료/.test(c.b)) && vd.cards.some(c => /팔꿈치 .* 조금/.test(c.t)), vd.cards.map(c => c.t).join(' / '));
+  check('리포트에 정도 표시', /손가락 통증\(많이\), 팔꿈치 통증\(조금\)/.test(buildReport('2026-11-16')));
+  check('팔꿈치 조금 → 풀업 빼지 않고 1세트 줄이기', (() => { const p = getSteps('homeC', '2026-11-17').find(x => x.tag === 'pull'); return p && !p.skip && /1세트 줄여/.test(p.note || ''); })());
 
   scene({ '2026-11-16': { session: 'homeA' }, '2026-11-17': { session: 'homeB' }, '2026-11-18': { session: 'volume', dur: 90, rpe: 5 } });
   r = recommend('2026-11-19');
@@ -99,7 +121,7 @@
   // 식단 판정: 적은 그대로 평균
   const lunch = { l: [{ f: 'rice', q: 1 }, { f: 'egg', q: 1 }] };
   scene({ '2026-11-09': { weight: 65.5, session: 'limit', food: lunch }, '2026-11-11': { weight: 65.2, food: lunch }, '2026-11-13': { weight: 64.9, session: 'volume', food: lunch }, '2026-11-15': { food: lunch } }, { startWeight: 65.5, targetWeight: 63, goal: 'cut' });
-  let vd = verdict('2026-11-09');
+  vd = verdict('2026-11-09');
   check('식단: 적은 기록 그대로 단백질 부족 경고 + 다음 주 식단 반영', vd.flags.protein && vd.cards.some(c => c.lv === 'warn' && /단백질 부족/.test(c.t)), vd.cards.map(c => c.t).join(' / '));
   check('암장 날 칼로리 부족 경고', vd.cards.some(c => c.lv === 'warn' && /암장 날 칼로리 부족/.test(c.t)));
   check('지난주 기록 없어도 이번 주 체중 흐름 표시', vd.cards.some(c => c.t === '이번 주 체중 흐름'));
@@ -139,6 +161,35 @@
   check('입문 + 밴드: 밴드 보조 풀업', /밴드 보조 풀업/.test(st('homeC', 'p')), st('homeC', 'p'));
   scene({});
   check('기구 설정 전: 기존대로 풀업, 행보드 단계 없음', /풀업/.test(st('homeC', 'p')) && !/로우/.test(st('homeC', 'p')) && !getSteps('homeC', '2026-11-17').some(x => x.id === 'h'), st('homeC', 'p'));
+
+  // 식단: 회사원 현실 반영 (운동 전 간식 없음 · 운동 중 마시는 것 · 단백질 목표 완화)
+  scene({ '2026-11-16': { weight: 64.7, session: 'volume' } }, { goal: 'cut', startWeight: 65.5, targetWeight: 63 });
+  const gs = slotsFor('2026-11-16').map(x => x.id);
+  check('암장 날 끼니: 운동 전 간식 칸 없음 · 운동 중 마시는 칸 있음', !gs.includes('e') && !gs.includes('n') && gs.includes('i'), gs.join(','));
+  check('단백질 목표: 64.7kg 감량 → 95g (1.5g/kg)', targets('2026-11-16').protein === 95, targets('2026-11-16').protein);
+  scene({ '2026-11-16': { session: 'volume', food: { e: [{ f: 'egg', q: 2 }] } } });
+  check('예전 기록의 운동 전 칸은 기록이 있으면 그대로 보임', slotsFor('2026-11-16').some(x => x.id === 'e' && /운동 1~1.5시간 전/.test(x.t)));
+  const lunch2 = { l: [{ f: 'sides', q: 1 }, { f: 'rice', q: 1 }] };
+  scene({ '2026-11-09': { weight: 65, food: lunch2 }, '2026-11-10': { weight: 65, food: lunch2 }, '2026-11-11': { weight: 65, food: lunch2 } }, { goal: 'cut', startWeight: 65.5, targetWeight: 63 });
+  vd = verdict('2026-11-09');
+  check('단백질 부족 → 지난주 평균 + 20g 단계 목표', vd.flags.proteinStep === 50, vd.flags.protein + ' → ' + vd.flags.proteinStep);
+
+  // 회사 급식 붙여넣기
+  const cp = parseCafe('# 이번 주 점심\n월: 물만두국, 콩나물제육볶음 300/19, 참나물무침\n화 황태해장국, 단호박카레라이스 550/12\n11/26 (수)\n어묵국\n목살구이', '2026-11-23');
+  const cd = cp.days;
+  check('급식: 요일 줄·날짜 머리글·여러 줄 반찬', Object.keys(cd).sort().join(',') === '2026-11-23,2026-11-24,2026-11-26' && cd['2026-11-26'].some(x => x.n === '목살구이'), JSON.stringify(Object.keys(cd)));
+  check('급식: 칼로리/단백질 숫자 그대로 · 없으면 DB 추정', cd['2026-11-23'].some(x => x.n === '콩나물제육볶음' && x.k === 300 && x.p === 19) && cd['2026-11-23'].some(x => x.n === '물만두국' && x.k > 0), JSON.stringify(cd['2026-11-23']));
+  check('급식: 밥 자동 추가 · 카레라이스 날은 안 넣음', cd['2026-11-23'][0].rice && cd['2026-11-23'][0].auto && !cd['2026-11-24'].some(x => x.auto));
+  check('급식: "목살구이"를 목요일로 착각하지 않음', !cd['2026-11-27']);
+  check('급식 추정: 콩나물제육볶음은 나물이 아니라 고기 · 나물무침은 가볍게', cafeGuess('콩나물제육볶음').how === '고기' && cafeGuess('참나물유자청무침').k <= 60 && cafeGuess('생선까스').k <= 350, JSON.stringify([cafeGuess('콩나물제육볶음'), cafeGuess('참나물유자청무침'), cafeGuess('생선까스')]));
+  scene({ '2026-11-23': { session: 'volume' } }, { cafeOn: true });
+  state.cafe = cd;
+  let ln = slotsFor('2026-11-23').find(x => x.id === 'l');
+  check('급식 켜면 점심 추천 = 그날 메뉴 (밥은 그날 밥 양)', ln.cafe && /회사 급식/.test(ln.t) && sugItems(ln.sug).some(it => it.n === '콩나물제육볶음' && it.k === 300) && sugItems(ln.sug).find(it => /^밥/.test(it.n)).q === riceQty('2026-11-23'), JSON.stringify(ln.sug));
+  check('급식 메뉴 한 번에 기록하면 칼로리·단백질 계산', (() => { dayW('2026-11-23').food = { l: sugItems(ln.sug) }; return foodTotals('2026-11-23').p >= 19; })());
+  state.settings.cafeOn = false;
+  ln = slotsFor('2026-11-24').find(x => x.id === 'l');
+  check('급식 끄면 지금처럼 직접 입력 추천', !ln.cafe && Array.isArray(ln.sug[0]));
 
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
