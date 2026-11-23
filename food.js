@@ -25,9 +25,21 @@ function inlineDeletedFood(f) {
   if (ui.sheet && ui.sheet.pend) conv(ui.sheet.pend);
 }
 const r1 = v => Math.round(v * 100) / 100;
+// 공기밥은 0.5인분 대신 ⅓ · ½ · ⅔ · 1 · 1⅓ · 1½ · 2공기로 움직임 (⅔에서 +0.5 하면 1⅙처럼 어색해서)
+const RICE_STEPS = [1 / 3, 1 / 2, 2 / 3, 1, 4 / 3, 3 / 2, 2];
+const isBowlRice = it => /공기/.test(foodOf(it).u || '') && /밥/.test(foodOf(it).n || '');
+function stepQty(it, dir) {
+  if (!isBowlRice(it)) return r1(it.q + 0.5 * dir); // 다른 음식은 0.5인분 단위
+  const q = it.q, eps = 0.01;
+  if (dir > 0) return RICE_STEPS.find(v => v > q + eps) || r1(q + 0.5);
+  const lower = RICE_STEPS.filter(v => v < q - eps);
+  return lower.length ? lower[lower.length - 1] : 0; // ⅓공기에서 −면 뺌
+}
 function qtyText(q) {
   const t = Math.round(q * 3);
   if (Math.abs(q * 3 - t) < 0.02 && t % 3 !== 0) { const w = Math.floor(t / 3), f = t % 3 === 1 ? '⅓' : '⅔'; return (w ? w : '') + f; }
+  const h = Math.round(q * 2);
+  if (Math.abs(q * 2 - h) < 0.02 && h % 2) return (h > 1 ? Math.floor(h / 2) : '') + '½';
   return String(r1(q)).replace(/\.0+$/, '');
 }
 
@@ -711,7 +723,7 @@ document.addEventListener('click', e => {
     case 'f-q': {
       const list = slotItems(d, b.dataset.slot), it = list[+b.dataset.i];
       if (!it) return;
-      it.q = r1(it.q + 0.5 * +b.dataset.d); // 모든 음식 0.5인분 단위
+      it.q = stepQty(it, +b.dataset.d);
       if (it.q <= 0.01) list.splice(+b.dataset.i, 1);
       if (!list.length) delete dayW(d).food[b.dataset.slot];
       return commit();
@@ -749,7 +761,7 @@ document.addEventListener('click', e => {
     case 'f-pq': {
       const p = ui.sheet.pend, it = p[+b.dataset.i];
       if (!it) return;
-      it.q = r1(it.q + 0.5 * +b.dataset.d);
+      it.q = stepQty(it, +b.dataset.d);
       if (it.q <= 0.01) p.splice(+b.dataset.i, 1);
       return refreshSheet();
     }
