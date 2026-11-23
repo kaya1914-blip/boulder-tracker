@@ -38,6 +38,9 @@ SAY = {
     'Y': '와이', 'T': '티', 'W': '더블유', 'V업': '브이업',
     '엎드려 Y·T·W 레이즈': '엎드려 와이 티 더블유 레이즈',
 }
+# 초 세기(하나·둘·셋…)만 따로 다시 녹음할 때의 분위기 (--soft). 이 녹음이 전체 녹음보다 우선
+SOFT_STYLE = '힘을 빼고 아주 부드럽게, 숨 쉬듯 리듬을 타며 숫자를 세듯이'
+SOFT_WORDS = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물']
 # 빠진 줄을 다시 읽힐 때만 쓰는 발음 (전체 녹음의 캐시가 바뀌지 않게 SAY와 따로)
 FILL_SAY = {'록오프': '락 오프'}
 MARK_AT = 0.30   # 파일 맨 앞 기준 신호 위치(초). 앱이 이 신호를 찾아 mp3 앞 지연을 보정
@@ -95,7 +98,9 @@ def gemini_record(voice, texts, tag, resplit):
         key = os.environ.get('GEMINI_API_KEY')
         if not key:
             raise SystemExit('GEMINI_API_KEY 환경 변수가 필요합니다')
-        prompt = (f"운동 코치 목소리로 {voice['style']}, 아래 줄을 위에서부터 한 줄씩 빠짐없이 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요:\n\n"
+        style = SOFT_STYLE if tag == 'soft' else voice['style']
+        prompt = (f"운동 코치 목소리로 {style}, 아래 줄을 위에서부터 한 줄씩 빠짐없이 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요. "
+                  "숫자를 세는 줄(하나, 둘, 셋…)은 힘을 빼고 부드럽게, 리듬을 타듯 가볍게 읽어 주세요:\n\n"
                   + '\n\n'.join(texts))
         body = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
                 'generationConfig': {'responseModalities': ['AUDIO'],
@@ -112,7 +117,7 @@ def gemini_record(voice, texts, tag, resplit):
     return array.array('h', open(fp, 'rb').read()), fp
 
 
-def gemini_batch(voice, phrases, resplit=False, fill=False):
+def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
     """목소리 하나의 조각들: 전체 녹음(호출 1번) + 빠진 줄만 다시 읽힌 녹음(--fill, 호출 1번씩)을 받아 적어 짝 맞춤"""
     import align_voice
     key = os.environ.get('GEMINI_API_KEY', '')
@@ -139,6 +144,13 @@ def gemini_batch(voice, phrases, resplit=False, fill=False):
         for p, (a, b) in fpick.items():
             if not shaky(ft[fphr.index(p)]):
                 out.setdefault(p, cut(fpcm, a, b))
+    # 초 세기를 부드럽게 다시 받은 녹음 (--soft): 있으면 전체 녹음보다 우선
+    soft_list = [p for p in SOFT_WORDS if p in phrases]
+    spcm, sfp = gemini_record(voice, soft_list, 'soft', resplit or not soft)
+    if spcm is not None:
+        spick, _ = align_voice.align(spcm, soft_list, soft_list, key, sfp[:-4] + '.heard2.json')
+        for p, (a, b) in spick.items():
+            out[p] = cut(spcm, a, b)
     miss = [p for p in phrases if p not in out]
     if fill and miss:
         if resplit:
@@ -170,12 +182,12 @@ def trim(pcm, thr=500):
     return pcm[max(0, idx[0] - pad): min(len(pcm), idx[-1] + 48 + pad)]
 
 
-def build(voice, phrases, use_fake, engine, resplit, fill=False):
+def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
     sil = lambda sec: array.array('h', bytes(2 * int(sec * SR)))
     pcm = sil(MARK_AT)
     pcm.extend(array.array('h', [12000 if (i // 12) % 2 else -12000 for i in range(int(0.02 * SR))]))  # 기준 신호 20ms
     pcm.extend(sil(0.3))
-    batch = gemini_batch(voice, phrases, resplit, fill) if engine == 'gemini' and not use_fake else None
+    batch = gemini_batch(voice, phrases, resplit, fill, soft) if engine == 'gemini' and not use_fake else None
     clips = {}
     for i, p in enumerate(phrases):
         if batch is not None and p not in batch:
@@ -199,6 +211,7 @@ def main():
     ap.add_argument('--engine', choices=['gemini', 'cloud'], default='gemini')
     ap.add_argument('--resplit', action='store_true', help='받아 둔 Gemini 녹음으로 다시 짝 맞추기만 (TTS 호출 없음)')
     ap.add_argument('--fill', action='store_true', help='짝을 못 찾은 줄만 모아 TTS를 1번 더 호출해 채우기')
+    ap.add_argument('--soft', action='store_true', help='초 세기(하나·둘…)만 부드럽게 다시 녹음 (TTS 호출 1번)')
     ap.add_argument('--fake', action='store_true')
     a = ap.parse_args()
     phrases = vocab()
@@ -209,7 +222,7 @@ def main():
         if a.only and v['id'] not in a.only.split(','):
             continue
         print(f"{v['id']} · {len(phrases)}개", file=sys.stderr)
-        man['voices'][v['id']] = build(v, phrases, a.fake, a.engine, a.resplit, a.fill)
+        man['voices'][v['id']] = build(v, phrases, a.fake, a.engine, a.resplit, a.fill, a.soft)
     man['voices'] = {k: man['voices'][k] for k in [v['id'] for v in VOICES] if k in man['voices']}  # 고르는 순서 고정
     man['version'] = hashlib.sha1(json.dumps(man, sort_keys=True).encode()).hexdigest()[:8]
     with open(man_fp, 'w') as f:

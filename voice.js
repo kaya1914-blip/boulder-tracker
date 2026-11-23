@@ -85,8 +85,17 @@ function clipSay(text) {
   toks.forEach(({ key, gap }) => {
     const [st, du] = v.clips[key];
     at += gap;
+    // 조각마다 아주 짧게 부드럽게 들어가고 빠짐 (딸깍 소리·툭 끊김 방지).
+    // 초 세기(둘·셋…)는 한 단어를 또박또박 읽은 녹음이라 문장 속 말보다 세게 들려서 소리를 낮추고 더 부드럽게
+    const soft = KCOUNT.includes(key), peak = soft ? 0.68 : 1, fin = soft ? 0.035 : 0.012, fout = Math.min(du / 3, soft ? 0.08 : 0.03);
+    const eg = actx.createGain();
+    eg.gain.setValueAtTime(0.0001, at);
+    eg.gain.linearRampToValueAtTime(peak, at + fin);
+    eg.gain.setValueAtTime(peak, at + du - fout);
+    eg.gain.linearRampToValueAtTime(0.0001, at + du);
+    eg.connect(g);
     const src = actx.createBufferSource();
-    src.buffer = buf; src.connect(g); src.start(at, Math.max(0, st + (v.delta || 0)), du);
+    src.buffer = buf; src.connect(eg); src.start(at, Math.max(0, st + (v.delta || 0)), du);
     VC.playing.push(src);
     at += du;
   });
