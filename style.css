@@ -861,3 +861,19 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .fill-all { margin: 4px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .fill-all small { font-size: 12px; font-weight: 600; opacity: .8; }
 .sa-btn.on { border-color: var(--accent); color: var(--accent); }
+
+/* 설정 접기 */
+.card.foldable > .card-h { cursor: pointer; user-select: none; }
+.card.foldable > .card-h::after { content: ''; flex: none; width: 8px; height: 8px; margin: 0 4px 0 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-2px); transition: transform .2s; }
+.card.folded > .card-h::after { transform: rotate(-45deg); }
+.card.folded > .card-h { margin-bottom: 0; }
+.card.foldable > .card-h { justify-content: flex-start; }
+.card.foldable > .card-h > h2 { margin-right: auto; }
+.card.folded > :not(.card-h) { display: none !important; }
+
+/* 알림 버튼 (되돌리기) · 새 버전 띠 */
+.toast.has-act { display: flex; align-items: center; gap: 14px; pointer-events: auto; width: max-content; }
+.toast.has-act > span { white-space: nowrap; }
+.toast-act { flex: none; border: 0; background: transparent; color: var(--accent); font-weight: 800; font-size: 14px; padding: 4px 2px; }
+.upd-bar { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 70; display: flex; align-items: center; gap: 12px; background: var(--ink); color: var(--bg); padding: 10px 12px 10px 16px; border-radius: 999px; font-size: 14px; font-weight: 700; box-shadow: 0 6px 24px rgba(0, 0, 0, .25); white-space: nowrap; }
+.upd-bar button { border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 800; padding: 7px 14px; }

@@ -650,10 +650,11 @@ document.addEventListener('click', e => {
     case 'f-toggle': { const k = b.dataset.key, o = openSlots(); o.has(k) ? o.delete(k) : o.add(k); return render(); }
     case 'f-fill-all': {
       const x = dayW(d); x.food = x.food || {};
+      const before = JSON.stringify(x.food);
       let n = 0, kc = 0;
       slotsFor(d).forEach(sl => { if (sl.sug.length && !(x.food[sl.id] || []).length) { x.food[sl.id] = sugItems(sl.sug); n++; kc += sumItems(x.food[sl.id]).k; } });
-      toast(`${n}끼 · ${Math.round(kc).toLocaleString()}kcal 기록 · 다르게 먹은 끼니만 눌러서 고치세요`);
-      return commit();
+      commit();
+      return toast(`${n}끼 ${Math.round(kc).toLocaleString()}kcal 기록됨`, { label: '되돌리기', fn: () => { dayW(d).food = JSON.parse(before); commit(); toast('되돌렸어요'); } });
     }
     case 'f-fix': {
       const items = ((day(d).food || {})[b.dataset.slot] || []).map(it => Object.assign({}, it));
@@ -665,9 +666,11 @@ document.addEventListener('click', e => {
     }
     case 'f-sug': {
       const sl = slotsFor(d).find(s => s.id === b.dataset.slot);
+      const before = JSON.stringify(day(d).food || {});
       dayW(d).food = Object.assign(day(d).food || {}, { [sl.id]: sugItems(sl.sug) });
       openSlots().delete(d + ':' + sl.id); // 기록하면 접힘
-      return commit();
+      commit();
+      return toast(`${sl.t} ${Math.round(sumItems(day(d).food[sl.id]).k)}kcal 기록`, { label: '되돌리기', fn: () => { dayW(d).food = JSON.parse(before); commit(); } });
     }
     case 'f-clear': { const x = dayW(d); if (x.food) delete x.food[b.dataset.slot]; return commit(); }
     case 'f-del': {
