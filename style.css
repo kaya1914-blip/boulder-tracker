@@ -865,3 +865,13 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .photo-box { background: var(--surface-2); border-radius: 14px; padding: 12px; margin: 12px 0 6px; }
 .photo-box .h3 { margin-top: 0; }
 .photo-btn { margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
+
+/* 끼니 한 번에 기록 */
+.slot-empty { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 0; }
+.slot-empty .sm-main { flex: 1; min-width: 0; display: flex; align-items: center; text-align: left; background: none; border: 0; color: inherit; padding: 12px 0 12px 14px; }
+.sm-quick { flex: none; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 9px 12px; font-size: 13px; font-weight: 800; background: rgba(255, 107, 44, .16); color: var(--accent); white-space: nowrap; }
+.sm-quick .ic { width: 15px; height: 15px; }
+.slot-empty .sm-todo { border: 0; }
+.fill-all { margin: 4px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.fill-all small { font-size: 12px; font-weight: 600; opacity: .8; }
+.sa-btn.on { border-color: var(--accent); color: var(--accent); }

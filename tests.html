@@ -252,6 +252,21 @@
     check('녹음 음성: "1회"가 "10회" 앞부분으로 잘못 맞지 않음', JSON.stringify(clipTokens('10회 내려', fakeV).map(x => x.key)) === '["10회","내려"]' && durSpeak(90) === '1분 30초');
   }
 
+  // 식단 입력 줄이기: 끼니 한 번에 · 남은 끼니 전부 · 매일 고정
+  scene({ '2026-11-23': { session: 'volume' } }, { preMeal: 'no', cafeOn: true, fixedMeals: { b: [{ f: 'juice', q: 1 }, { f: 'egg', q: 3 }] } });
+  state.cafe = { '2026-11-23': [{ n: '시락국', k: 70, p: 4, u: '1인분' }, { n: '돈육간장불고기', k: 300, p: 20, u: '1인분' }] };
+  let sl = slotsFor('2026-11-23');
+  check('고정한 아침이 추천 대신 나옴 · 점심은 급식', sl.find(x => x.id === 'b').fixed && sugItems(sl.find(x => x.id === 'b').sug).some(it => it.f === 'egg' && it.q === 3) && sl.find(x => x.id === 'l').cafe);
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fill-all"]').click();
+  const fd = day('2026-11-23').food || {};
+  check('"남은 끼니 한 번에" → 추천이 있는 빈 끼니가 모두 채워짐 (기타·간식은 빈 채로)', ['b', 'l', 'i', 'a', 'd'].every(k => (fd[k] || []).length) && !(fd.o || []).length && fd.l.some(it => it.n === '돈육간장불고기'), Object.keys(fd).join(','));
+  render(); ui.openSlots = new Set(['2026-11-23:d']);
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fix"][data-slot="d"]').click();
+  check('"매일 이대로" → 그 끼니 구성이 고정으로 저장', fixedMeals().d && sameItems(fixedMeals().d, day('2026-11-23').food.d));
+  ui.focus = null; ui.openSlots = new Set();
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');
