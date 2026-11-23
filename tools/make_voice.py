@@ -5,7 +5,8 @@
 앱은 문장을 이 조각으로 나눠 이어 붙여 재생합니다.
 
   GEMINI_API_KEY=... python3 tools/make_voice.py --only f1      # Gemini TTS (무료 티어) · 목소리 하나 = 호출 1번
-  python3 tools/make_voice.py --resplit                         # 받아 둔 녹음을 다시 자르기만 (호출 없음)
+  GEMINI_API_KEY=... python3 tools/make_voice.py --only f1 --fill   # 짝을 못 찾은 줄만 다시 읽히기 (TTS 호출 1번)
+  GEMINI_API_KEY=... python3 tools/make_voice.py --resplit      # 받아 둔 녹음으로 다시 짝 맞추기만 (TTS 호출 없음)
   python3 tools/make_voice.py --fake                            # API 없이 삐 소리로 만드는 시험용 (재생 엔진 점검)
   GOOGLE_API_KEY=... python3 tools/make_voice.py --engine cloud # Cloud Text-to-Speech (조각마다 호출)
 
@@ -74,80 +75,70 @@ def cloud_synth(voice, phrase):
 
 
 # ---------- Gemini TTS (목소리 하나 = 호출 1번, 무음에서 자르기) ----------
-def gemini_batch(voice, phrases, resplit=False):
+def gemini_record(voice, texts, tag, resplit):
+    """Gemini TTS 호출 1번으로 여러 줄을 읽게 해 받은 녹음(PCM). 캐시가 있으면 호출하지 않음"""
     os.makedirs(CACHE, exist_ok=True)
-    texts = [speak_text(p) for p in phrases]
     h = hashlib.sha1(json.dumps([voice['gemini'], voice['style'], texts], ensure_ascii=False).encode()).hexdigest()[:12]
-    fp = os.path.join(CACHE, f"gemini_{voice['id']}_{h}.pcm")
+    fp = os.path.join(CACHE, f"gemini_{voice['id']}_{tag}{h}.pcm")
     if not os.path.exists(fp):
         if resplit:
-            raise SystemExit(f"{voice['id']}: 받아 둔 녹음이 없습니다 (--resplit은 호출하지 않음)")
+            return None, fp
         key = os.environ.get('GEMINI_API_KEY')
         if not key:
             raise SystemExit('GEMINI_API_KEY 환경 변수가 필요합니다')
-        prompt = (f"운동 코치 목소리로 {voice['style']}, 아래 줄을 위에서부터 한 줄씩 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요:\n\n"
+        prompt = (f"운동 코치 목소리로 {voice['style']}, 아래 줄을 위에서부터 한 줄씩 빠짐없이 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요:\n\n"
                   + '\n\n'.join(texts))
         body = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
                 'generationConfig': {'responseModalities': ['AUDIO'],
                                      'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': voice['gemini']}}}}}
         r = urllib.request.Request(GEMINI, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', 'x-goog-api-key': key})
-        print(f"  {voice['id']}: Gemini 호출 1회 ({len(texts)}줄)", file=sys.stderr)
+        print(f"  {voice['id']}: Gemini TTS 호출 1회 ({len(texts)}줄)", file=sys.stderr)
         d = json.load(urllib.request.urlopen(r, timeout=900))
         c = d['candidates'][0]
         if 'content' not in c:
             raise SystemExit(f"{voice['id']}: 음성이 비어서 왔습니다 (finishReason={c.get('finishReason')})")
         with open(fp, 'wb') as f:
             f.write(base64.b64decode(c['content']['parts'][0]['inlineData']['data']))
-    pcm = array.array('h', open(fp, 'rb').read())
-    # 무음 순서만으로는 못 믿음(건너뛰기·순서 바뀜) → 조각을 받아 적게 해서 내용으로 짝을 맞춤
+        json.dump(texts, open(fp[:-4] + '.texts.json', 'w'), ensure_ascii=False)
+    return array.array('h', open(fp, 'rb').read()), fp
+
+
+def gemini_batch(voice, phrases, resplit=False, fill=False):
+    """목소리 하나의 조각들: 전체 녹음(호출 1번) + 빠진 줄만 다시 읽힌 녹음(--fill, 호출 1번씩)을 받아 적어 짝 맞춤"""
     import align_voice
     key = os.environ.get('GEMINI_API_KEY', '')
-    pick, miss = align_voice.align(pcm, phrases, texts, key, fp[:-4] + '.heard.json')
-    return {p: pcm[max(0, a - int(PAD * SR)): b + int(PAD * SR)] for p, (a, b) in pick.items()}
-
-
-def split_by_silence(pcm, texts, vid, thr=700, min_gap=0.25):
-    """소리 덩어리를 찾고(0.25초 미만 쉼은 같은 덩어리), 줄 수에 맞게 가장 긴 쉼 N-1개를 경계로 고름.
-    줄 사이 쉼(약 2초)이 문장 안 쉼(마침표 등)보다 길다는 것을 이용. 조각 길이와 글자 수의 상관으로 어긋남을 점검."""
-    win = int(0.01 * SR)
-    loud = [max(abs(x) for x in pcm[i:i + win]) > thr for i in range(0, len(pcm) - win, win)]
-    hold = int(min_gap * 100)
-    regions, i = [], 0
-    while i < len(loud):
-        if not loud[i]:
-            i += 1
+    texts = [speak_text(p) for p in phrases]
+    by_text = dict(zip(texts, phrases))
+    cut = lambda pcm, a, b: pcm[max(0, a - int(PAD * SR)): b + int(PAD * SR)]
+    pcm, fp = gemini_record(voice, texts, '', resplit)
+    if pcm is None:
+        raise SystemExit(f"{voice['id']}: 받아 둔 녹음이 없습니다 (--resplit은 호출하지 않음)")
+    pick, miss = align_voice.align(pcm, phrases, texts, key, fp[:-4] + '.heard2.json')
+    out = {p: cut(pcm, a, b) for p, (a, b) in pick.items()}
+    # 예전에 받아 둔 '빠진 줄' 녹음들
+    import glob
+    for ffp in sorted(glob.glob(os.path.join(CACHE, f"gemini_{voice['id']}_fill*.pcm"))):
+        ft = json.load(open(ffp[:-4] + '.texts.json'))
+        fphr = [by_text[t] for t in ft if t in by_text]
+        if not fphr:
             continue
-        j = i
-        while j < len(loud) and (loud[j] or any(loud[j:j + hold])):
-            j += 1
-        regions.append((i, j))
-        i = j
-    n = len(texts)
-    lens = [len(t.replace(' ', '')) for t in texts]
-    if len(regions) < n:
-        raise SystemExit(f"{vid}: 소리 덩어리 {len(regions)}개 < 줄 {n}개 (줄이 합쳐짐) · 다시 생성 필요")
-    best = None
-    for skip in range(0, min(4, len(regions) - n) + 1):  # 앞에 지시문을 읽어 버렸을 때를 대비해 앞 덩어리를 건너뛰어 봄
-        rs = regions[skip:]
-        cuts = sorted(sorted(range(len(rs) - 1), key=lambda k: rs[k + 1][0] - rs[k][1], reverse=True)[:n - 1])
-        segs, st = [], 0
-        for k in cuts:
-            segs.append((rs[st][0], rs[k][1]))
-            st = k + 1
-        segs.append((rs[st][0], rs[-1][1]))
-        durs = [b - a for a, b in segs]
-        mx, my = sum(lens) / n, sum(durs) / n
-        cov = sum((a - mx) * (b - my) for a, b in zip(lens, durs))
-        den = math.sqrt(sum((a - mx) ** 2 for a in lens) * sum((b - my) ** 2 for b in durs)) or 1
-        r = cov / den
-        if not best or r > best[0]:
-            best = (r, segs, skip)
-    r, segs, skip = best
-    print(f"  {vid}: 소리 덩어리 {len(regions)}개 → {n}줄 · 앞 건너뜀 {skip} · 길이-글자 상관 {r:.2f}", file=sys.stderr)
-    if r < 0.6:
-        raise SystemExit(f"{vid}: 잘린 조각과 줄이 잘 맞지 않습니다 (상관 {r:.2f}) · 결과를 쓰지 않음")
-    pad = int(PAD * SR)
-    return [pcm[max(0, a * win - pad): min(len(pcm), b * win + pad)] for a, b in segs]
+        fpcm = array.array('h', open(ffp, 'rb').read())
+        fpick, _ = align_voice.align(fpcm, fphr, [speak_text(p) for p in fphr], key, ffp[:-4] + '.heard2.json')
+        for p, (a, b) in fpick.items():
+            out.setdefault(p, cut(fpcm, a, b))
+    miss = [p for p in phrases if p not in out]
+    if fill and miss:
+        if resplit:
+            print(f"  {voice['id']}: 빠진 {len(miss)}개는 --fill로 다시 녹음해야 합니다 (--resplit은 호출하지 않음)", file=sys.stderr)
+        else:
+            ftexts = [speak_text(p) for p in miss]
+            fpcm, ffp = gemini_record(voice, ftexts, 'fill', False)
+            fpick, _ = align_voice.align(fpcm, miss, ftexts, key, ffp[:-4] + '.heard2.json')
+            for p, (a, b) in fpick.items():
+                out.setdefault(p, cut(fpcm, a, b))
+    left = [p for p in phrases if p not in out]
+    print(f"  {voice['id']}: 최종 {len(out)}/{len(phrases)}개" + (f" · 아직 빠짐 {len(left)}: {', '.join(left)}" if left else ''), file=sys.stderr)
+    return out
 
 
 def fake(phrase):
@@ -166,12 +157,12 @@ def trim(pcm, thr=500):
     return pcm[max(0, idx[0] - pad): min(len(pcm), idx[-1] + 48 + pad)]
 
 
-def build(voice, phrases, use_fake, engine, resplit):
+def build(voice, phrases, use_fake, engine, resplit, fill=False):
     sil = lambda sec: array.array('h', bytes(2 * int(sec * SR)))
     pcm = sil(MARK_AT)
     pcm.extend(array.array('h', [12000 if (i // 12) % 2 else -12000 for i in range(int(0.02 * SR))]))  # 기준 신호 20ms
     pcm.extend(sil(0.3))
-    batch = gemini_batch(voice, phrases, resplit) if engine == 'gemini' and not use_fake else None
+    batch = gemini_batch(voice, phrases, resplit, fill) if engine == 'gemini' and not use_fake else None
     clips = {}
     for i, p in enumerate(phrases):
         if batch is not None and p not in batch:
@@ -193,7 +184,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--only', help='이 id의 목소리만 (쉼표로 여러 개)')
     ap.add_argument('--engine', choices=['gemini', 'cloud'], default='gemini')
-    ap.add_argument('--resplit', action='store_true', help='받아 둔 Gemini 녹음을 다시 자르기만 (호출 없음)')
+    ap.add_argument('--resplit', action='store_true', help='받아 둔 Gemini 녹음으로 다시 짝 맞추기만 (TTS 호출 없음)')
+    ap.add_argument('--fill', action='store_true', help='짝을 못 찾은 줄만 모아 TTS를 1번 더 호출해 채우기')
     ap.add_argument('--fake', action='store_true')
     a = ap.parse_args()
     phrases = vocab()
@@ -204,7 +196,7 @@ def main():
         if a.only and v['id'] not in a.only.split(','):
             continue
         print(f"{v['id']} · {len(phrases)}개", file=sys.stderr)
-        man['voices'][v['id']] = build(v, phrases, a.fake, a.engine, a.resplit)
+        man['voices'][v['id']] = build(v, phrases, a.fake, a.engine, a.resplit, a.fill)
     man['voices'] = {k: man['voices'][k] for k in [v['id'] for v in VOICES] if k in man['voices']}  # 고르는 순서 고정
     man['version'] = hashlib.sha1(json.dumps(man, sort_keys=True).encode()).hexdigest()[:8]
     with open(man_fp, 'w') as f:
