@@ -340,6 +340,23 @@ function foodTotals(date) {
 }
 
 // ---------- 식단 카드 ----------
+// ---------- 남은 단백질 채우기 ----------
+// 오늘 먹은 걸 적었는데 단백질이 모자라면, 남은 칼로리 안에서 단백질이 많은 간식을 골라 한 번에 '기타·간식'에 넣게
+// 회사·퇴근길에 바로 먹기 쉬운 순서
+const PROTEIN_SNACKS = [['protein', 1], ['greekyogurt', 1.5], ['egg', 2], ['soymilk', 1], ['chstk', 1], ['tofu', 1], ['milk', 1]];
+function proteinHelper(date, p, pt, k, kt) {
+  if (date !== todayStr() || !foodTotals(date).n) return '';
+  // 아직 안 먹은 끼니는 추천(급식·고정 포함)대로 먹는다고 보고, 그래도 모자랄 때만
+  const fd = day(date).food || {}, rest = slotsFor(date).filter(sl => !(fd[sl.id] || []).length).reduce((a, sl) => { const t = sumItems(sugItems(sl.sug)); return { k: a.k + t.k, p: a.p + t.p }; }, { k: 0, p: 0 });
+  const gap = Math.round(pt - p - rest.p), left = Math.round(kt - k - rest.k), later = rest.p > 0;
+  if (gap < 8) return '';
+  const opts = PROTEIN_SNACKS.map(([f, q]) => ({ f, q, k: Math.round(FOOD_MAP[f].k * q), p: Math.round(FOOD_MAP[f].p * q) }))
+    .filter(o => o.k <= Math.max(left + 120, 130)) // 칼로리 목표를 크게 넘지 않는 것만
+    .slice(0, 3);
+  if (!opts.length) return '';
+  return `<div class="pgap"><p>${later ? '남은 끼니를 추천대로 먹어도 ' : ''}<b>단백질 ${gap}g 모자라요</b> · 칼로리 여유 ${Math.max(0, left).toLocaleString()}kcal</p>
+    <div class="pgap-row">${opts.map(o => `<button class="chipbtn" data-act="f-pgap" data-date="${date}" data-f="${o.f}" data-q="${o.q}">${ic('plus')}${esc(FOOD_MAP[o.f].n.replace(/ \(.*\)$/, ''))}${o.q !== 1 ? ' ' + qtyText(o.q) : ''} <em>+${o.p}g · ${o.k}kcal</em></button>`).join('')}</div></div>`;
+}
 function dietCard(date) {
   const gym = isGymDay(date), x = day(date), fd = x.food || {};
   const slots = slotsFor(date), tot = foodTotals(date);
@@ -356,6 +373,7 @@ function dietCard(date) {
     ${sessOn(date) ? '' : '<p class="hint">세션을 고르기 전이라 쉬는 날 기준으로 보여줍니다.</p>'}
     ${tg.auto.none ? `<button class="nag" data-act="tab" data-tab="settings">${ic('scale')}체중·키·나이를 넣으면 칼로리와 단백질 목표가 내 몸에 맞춰집니다 · 설정</button>` : ''}
     ${dietNotes(date).map(n => `<p class="note">${ic('spark')}${n}</p>`).join('')}
+    ${proteinHelper(date, p, pt, k, kt)}
     ${(() => { const n = slots.filter(sl => sl.sug.length && !(fd[sl.id] || []).length).length; return n >= 2 ? `<button class="btn wide fill-all" data-act="f-fill-all" data-date="${date}">${ic('check')}남은 ${n}끼 한 번에 기록 <small>급식·고정·추천대로 · 다르게 먹은 끼니만 고치기</small></button>` : ''; })()}
     <div class="slots">${slots.map(sl => slotBlock(date, sl, fd[sl.id] || [])).join('')}</div>
     <p class="hint">칼로리는 음식 DB의 대략치입니다. 피할 것 · ${PLAN.avoid}</p>
@@ -660,6 +678,13 @@ document.addEventListener('click', e => {
   switch (a) {
     case 'sheet-close': return closeSheet();
     case 'f-toggle': { const k = b.dataset.key, o = openSlots(); o.has(k) ? o.delete(k) : o.add(k); return render(); }
+    case 'f-pgap': {
+      const before = JSON.stringify(day(d).food || {});
+      const list = slotItems(d, 'o'), f = b.dataset.f, q = +b.dataset.q, ex = list.find(it => it.f === f);
+      if (ex) ex.q = r1(ex.q + q); else list.push({ f, q });
+      commit();
+      return toast(`${FOOD_MAP[f].n.replace(/ \(.*\)$/, '')} +${Math.round(FOOD_MAP[f].p * q)}g 기록`, { label: '되돌리기', fn: () => { dayW(d).food = JSON.parse(before); commit(); } });
+    }
     case 'f-fill-all': {
       const x = dayW(d); x.food = x.food || {};
       const before = JSON.stringify(x.food);
