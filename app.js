@@ -217,6 +217,17 @@ function targets(date) {
   return { gym: isNum(s.kcalGym) ? s.kcalGym : a.gym, rest: isNum(s.kcalRest) ? s.kcalRest : a.rest, protein: isNum(s.protein) ? s.protein : a.protein, auto: a };
 }
 
+// 목표 체중이 저체중(BMI 18.5 미만)이거나 감량 속도가 너무 빠르면(주 체중의 1% 초과) 알림. 클라이머는 덜 먹으면 손가락 인대·뼈가 먼저 약해짐
+function goalRisk() {
+  const st = state.settings;
+  if (goalOf() !== 'cut' || !weightGoal() || !isNum(st.heightCm)) return null;
+  const h = st.heightCm / 100, bmiT = st.targetWeight / (h * h), minW = Math.ceil(18.5 * h * h * 10) / 10;
+  const wk = Math.max(1, diffDays(st.targetDate, st.startDate) / 7), pace = (st.startWeight - st.targetWeight) / wk, pct = pace / st.startWeight * 100;
+  const out = [];
+  if (bmiT < 18.5) out.push(`목표 ${st.targetWeight}kg은 BMI ${bmiT.toFixed(1)}로 저체중입니다 (키 ${st.heightCm}cm는 ${minW}kg 이상이 정상 범위)`);
+  if (pct > 1) out.push(`주 ${pace.toFixed(2)}kg(체중의 ${pct.toFixed(1)}%)은 빠릅니다 · 주 ${(st.startWeight * 0.007).toFixed(1)}kg 안팎이 근육·손가락 힘을 지키는 속도`);
+  return out.length ? out : null;
+}
 function weekCfg(w) {
   const c = Object.assign({}, PLAN.weeks[Math.min(Math.max(w, 1), 8)], w < 1 ? { pre: true } : {});
   c.goal = fill(c.goal);
@@ -517,7 +528,11 @@ function verdict(mon) {
   const os = overrideStats(addDays(mon, 6));
   if (os.painAfter) cards.push({ lv: 'warn', icon: 'alert', t: `회복 권고를 무시한 뒤 통증 ${os.painAfter}회`, b: `최근 4주 동안 쉬라는 날 손가락 운동을 한 날이 ${os.risky}일이고, 그중 ${os.painAfter}번은 1~2일 안에 통증을 기록했습니다. 회복 추천을 따라 주세요.` });
   else if (os.risky >= 3) cards.push({ lv: 'info', icon: 'info', t: `회복 권고와 다르게 운동 ${os.risky}일`, b: '최근 4주 동안 쉬라는 날 손가락 운동을 했지만 통증은 없었습니다. 계속 괜찮다면 설정의 회복 기준(plan.js recovery)을 느슨하게 조정할 수 있습니다.' });
-  if (!cards.some(c => c.lv === 'warn')) cards.push({ lv: 'ok', icon: 'check', t: '조정 없음', b: '모든 규칙이 정상입니다. 다음 주 진행표대로 갑니다.' });
+  if (goalRisk()) cards.push({ lv: 'warn', icon: 'scale', t: '체중 목표 점검 필요', b: `${goalRisk().join('. ')}. 설정 → 체중 목표에서 목표 체중·목표일을 다시 정하거나 "유지"로 바꾸세요.` });
+  // ③ 기록이 적으면 '정상'이라고 하지 않음
+  const enough = s.weights.length >= 3 || s.diet.logged >= 3 || s.done >= 3;
+  if (!cards.some(c => c.lv === 'warn')) cards.push(enough ? { lv: 'ok', icon: 'check', t: '조정 없음', b: '모든 규칙이 정상입니다. 다음 주 진행표대로 갑니다.' }
+    : { lv: 'info', icon: 'info', t: '판정할 기록이 아직 적어요', b: `운동 ${s.done}회 · 체중 ${s.weights.length}일 · 식단 ${s.diet.logged}일 기록. 아침 체중·몸 상태와 운동 시간·RPE를 3일 이상 적으면 판정합니다.` });
   return { cards, flags, s, p, ended };
 }
 
@@ -693,13 +708,22 @@ function bigStepper(date, k, label, unit, step, ph) {
     </div>
   </div>`;
 }
+// 컨디션 점수는 수면·통증·어제 운동량만 보므로, 48시간 손가락 회복 등 추천 규칙상 고강도가 안 되는 날은 문구를 맞춤
+function readyAdvice(date, rd) {
+  if (rd.lv !== 'good' && rd.lv !== 'ok') return { t: rd.advice, why: '' };
+  const r = recommend(date);
+  if (r.canHigh) return { t: rd.advice, why: '' };
+  const h = r.rc.lastHardFinger;
+  const why = h && h < PLAN.recovery.highGapDays ? `손가락 힘줄 회복 중 · 힘든 손가락 운동 ${h * 24}시간 전 (48시간 필요)` : r.rc.y && r.rc.y.hard ? '어제 고강도 → 오늘은 강도를 낮춰서' : r.tHigh ? '내일 고강도 예정' : '회복 규칙상 고강도는 쉬는 날';
+  return { t: '고강도는 쉬는 날', why };
+}
 function morningCard(date) {
-  const lw = lastWeightBefore(addDays(date, -1)), x = day(date), rd = readiness(date);
+  const lw = lastWeightBefore(addDays(date, -1)), x = day(date), rd = readiness(date), ra = readyAdvice(date, rd);
   return `<section class="card ready r-${rd.lv}">
     <div class="card-h"><h2>컨디션 체크</h2><span class="muted">매일 아침</span></div>
     <div class="rd-row">
       ${ring(rd.score / 100, 74, 7, 'rd-ring', `<b>${rd.score}</b><small>점</small>`)}
-      <div class="rd-txt"><b>${rd.label} · ${rd.advice}</b><small>${rd.why.length ? esc(rd.why.join(' · ')) : rd.logged ? '감점 요인 없음' : '수면을 적으면 더 정확해집니다'}</small></div>
+      <div class="rd-txt"><b>${rd.label} · ${ra.t}</b><small>${ra.why ? esc(ra.why) + (rd.why.length ? ' · ' : '') : ''}${rd.why.length ? esc(rd.why.join(' · ')) : ra.why ? '' : rd.logged ? '감점 요인 없음' : '수면을 적으면 더 정확해집니다'}</small></div>
     </div>
     <div class="metrics2">
       ${bigStepper(date, 'weight', '체중', 'kg', 0.1, lw != null ? String(lw) : '—')}
@@ -1030,7 +1054,7 @@ function buildReport(mon) {
   {
     const tg = targets(mon), wk = Math.max(1, diffDays(st.targetDate, st.startDate) / 7);
     const who = [st.sex === 'm' ? '남' : st.sex === 'f' ? '여' : '', isNum(st.age) ? st.age + '세' : '', isNum(st.heightCm) ? st.heightCm + 'cm' : ''].filter(Boolean).join(' ');
-    L.push(`- 나: ${who || '정보 없음 (성별·나이·키 미입력 → 칼로리는 체중만으로 대략 계산)'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}`);
+    L.push(`- 나: ${who || '정보 없음 (성별·나이·키 미입력 → 칼로리는 체중만으로 대략 계산)'} · 체중 목표 ${GOALS[goalOf()]}${weightGoal() ? ` (${st.targetDate}까지 ${st.startWeight}kg → ${st.targetWeight}kg, 주 ${Math.abs((st.startWeight - st.targetWeight) / wk).toFixed(2)}kg)` : ''}${goalRisk() ? ` · ⚠ ${goalRisk().join(' / ')}` : ''}`);
     L.push(`- 식단 목표: 단백질 ${tg.protein}g/일, 암장 날 ${tg.gym}kcal · 쉬는 날 ${tg.rest}kcal${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? ' (직접 지정)' : ' (자동 계산)'}`);
   }
   L.push(`- 레벨: V${lvl()}${gradeSys() === 'v' ? '' : ` (${PLAN.gradeSystems[gradeSys()].name} ${levelName()})`} · ${tier().range} ${tier().name} · 한계 ${grades().proj} · 볼륨 ${grades().vol}`);
@@ -1142,6 +1166,7 @@ function viewSettings() {
         <label class="field"><span>목표일</span><input type="date" data-field="set:targetDate" value="${st.targetDate}"></label>
         ${num('plateauKg', '정체 기준 (kg/주)', 0.1)}${num('fastLossKg', '급변 기준 (kg/주)', 0.1)}
       </div>
+      ${goalRisk() ? `<p class="warn">${ic('alert')}${goalRisk().join('. ')}. 너무 적게 먹으면 회복이 늦고 손가락 인대·뼈 부상과 생리 불순 위험이 커집니다. 목표를 "유지"로 두고 근력으로 체중 대비 힘을 올리는 쪽을 권합니다.</p>` : ''}
       <p class="hint">감량은 주 0.3~0.7kg, 증량은 주 0.2~0.4kg 정도가 손가락·관절 부담 없이 안전합니다.</p>
     </section>
     <section class="card"><div class="card-h"><h2>식단 목표</h2><span class="muted">${isNum(st.kcalGym) || isNum(st.kcalRest) || isNum(st.protein) ? '직접 지정' : '자동'}</span></div>

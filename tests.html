@@ -320,6 +320,22 @@
     check('리포트: 몸 상태 기록 일수', /몸 상태 기록 1\/7일/.test(buildReport(mondayOf(td))));
   }
 
+  // 컨디션 칸과 추천이 어긋나지 않게 · 목표 체중 안전 점검 · 기록이 적을 때 판정 보류
+  {
+    const wife = { '2026-11-22': { session: 'homeA', dur: 30, rpe: 6 }, '2026-11-23': { session: 'limit', dur: 125, rpe: 7, sore: 1 } };
+    scene(wife, { sex: 'f', age: 33, heightCm: 153, startWeight: 44, targetWeight: 41, goal: 'cut', level: 3, track: 'ret', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    const rd = readiness('2026-11-24'), ra = readyAdvice('2026-11-24', rd);
+    check('한계 다음 날: 점수가 좋아도 "고강도 OK"라고 하지 않음 (추천은 휴식)', !/고강도 OK/.test(ra.t) && /48시간/.test(ra.why) && !recommend('2026-11-24').canHigh, `${rd.score}점 · ${ra.t} · ${ra.why}`);
+    const gr = goalRisk() || [];
+    check('목표 체중 점검: 153cm 41kg은 저체중 · 주 1kg은 빠름', gr.some(t => /저체중/.test(t)) && gr.some(t => /빠릅니다/.test(t)), gr.join(' / '));
+    vd = verdict('2026-11-23');
+    check('주간 판정에 체중 목표 경고 · 기록 적으면 "조정 없음" 대신 판정 보류', vd.cards.some(c => c.t === '체중 목표 점검 필요') && !vd.cards.some(c => c.t === '조정 없음'));
+    scene({}, { sex: 'm', heightCm: 167, startWeight: 65.5, targetWeight: 63, goal: 'cut', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    check('남편 목표(167cm 65.5→63kg, 주 0.65kg)는 경고 없음', !goalRisk());
+    scene({ '2026-11-24': { weight: 65 } }, { sex: 'm', heightCm: 167, startWeight: 65.5, targetWeight: 63, goal: 'cut', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    check('기록이 거의 없으면 "판정할 기록이 아직 적어요"', verdict('2026-11-23').cards.some(c => /판정할 기록이 아직 적어요/.test(c.t)));
+  }
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');
