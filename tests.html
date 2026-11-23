@@ -267,6 +267,12 @@
   check('"매일 이대로" → 그 끼니 구성이 고정으로 저장', fixedMeals().d && sameItems(fixedMeals().d, day('2026-11-23').food.d));
   ui.focus = null; ui.openSlots = new Set();
 
+  // 한 끼 밥 양 직접 정하기
+  scene({ '2026-11-23': { session: 'volume' } }, { riceBowl: 2 / 3, cafeOn: true });
+  state.cafe = { '2026-11-23': [{ n: '밥 (급식)', k: 310, p: 5.5, u: '1공기', rice: true }, { n: '돈육간장불고기', k: 300, p: 20 }] };
+  check('밥 양을 정하면 저녁 추천은 밥이 따로 붙는 메뉴만', Array.from({ length: 14 }, (_, i) => PLAN.dinners[dinnerDefault(addDays('2026-11-23', i))].rice).every(Boolean));
+  check('밥 ⅔공기로 정하면 점심 급식·저녁 추천 모두 ⅔공기', Math.abs(riceQty('2026-11-23') - 2 / 3) < 0.01 && Math.abs(cafeItems('2026-11-23').find(x => /^밥/.test(x.n)).q - 2 / 3) < 0.01 && /밥 ⅔공기 기준/.test(cafeDayLine('2026-11-23', state.cafe['2026-11-23'])));
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');
