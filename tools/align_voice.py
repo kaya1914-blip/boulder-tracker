@@ -137,6 +137,7 @@ def align(pcm, phrases, texts, key, cache_fp, accept=0.5):
     R = regions_of(pcm)
     heard = transcribe(pcm, R, key, cache_fp)
     E = [norm(t) for t in texts]
+    known = set(E)  # 받아 적은 글이 목록의 '다른' 말과 똑같으면 그 소리는 이 말이 아님 (풀업 ↔ 푸시업 같은 혼동 방지)
     n, m = len(E), len(R)
     NEG = -1e9
     dp = [[NEG] * (m + 1) for _ in range(n + 1)]
@@ -156,7 +157,7 @@ def align(pcm, phrases, texts, key, cache_fp, accept=0.5):
                     if k + span > m:
                         break
                     forms = _combos([heard_forms(heard[k + j]) for j in range(span)])
-                    s = max(sim(E[i], f) for f in forms)
+                    s = max(0.0 if (f in known and f != E[i]) else sim(E[i], f) for f in forms)
                     if span > 1:
                         s -= 0.05 * (span - 1)  # 합치기는 꼭 필요할 때만
                     if s < 0.3:
@@ -174,6 +175,15 @@ def align(pcm, phrases, texts, key, cache_fp, accept=0.5):
         if span and s >= accept:
             pick[phrases[pi]] = (R[pk][0], R[pk + span - 1][1])
         i, k = pi, pk
+    # 덩어리 수 = 줄 수이고 대부분이 제자리에서 정확히 맞았다면, 순서가 그대로인 녹음 → 나머지도 위치로 판단
+    if m == n:
+        inplace = sum(1 for i in range(n) if E[i] in heard_forms(heard[i]))
+        for i in range(n):
+            if phrases[i] in pick:
+                continue
+            s_i = max(sim(E[i], f) for f in heard_forms(heard[i]))
+            if (inplace >= 0.6 * n and s_i >= 0.3) or inplace >= n - 1:
+                pick[phrases[i]] = R[i]
     miss = [p for p in phrases if p not in pick]
     print(f"  짝 맞춤: {len(pick)}/{len(phrases)} · 못 찾음 {len(miss)}: {', '.join(miss[:40])}{' …' if len(miss) > 40 else ''}", file=sys.stderr)
     return pick, miss

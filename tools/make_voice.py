@@ -38,6 +38,8 @@ SAY = {
     'Y': '와이', 'T': '티', 'W': '더블유', 'V업': '브이업',
     '엎드려 Y·T·W 레이즈': '엎드려 와이 티 더블유 레이즈',
 }
+# 빠진 줄을 다시 읽힐 때만 쓰는 발음 (전체 녹음의 캐시가 바뀌지 않게 SAY와 따로)
+FILL_SAY = {'록오프': '락 오프'}
 MARK_AT = 0.30   # 파일 맨 앞 기준 신호 위치(초). 앱이 이 신호를 찾아 mp3 앞 지연을 보정
 GAP = 0.16       # 조각 사이 무음(초)
 PAD = 0.02       # 조각 앞뒤로 남겨 둘 여유(초)
@@ -45,6 +47,13 @@ PAD = 0.02       # 조각 앞뒤로 남겨 둘 여유(초)
 
 def speak_text(p):
     return SAY.get(p, p).replace('·', ' ')
+
+
+def fill_text(p):
+    t = speak_text(p)
+    for a, b in FILL_SAY.items():
+        t = t.replace(a, b)
+    return t
 
 
 def vocab():
@@ -113,25 +122,29 @@ def gemini_batch(voice, phrases, resplit=False, fill=False):
     pcm, fp = gemini_record(voice, texts, '', resplit)
     if pcm is None:
         raise SystemExit(f"{voice['id']}: 받아 둔 녹음이 없습니다 (--resplit은 호출하지 않음)")
+    # FILL_SAY에 있는 말(예: 록오프)은 원래 발음으로 읽힌 녹음에서는 받지 않음 — 발음이 불분명해서 다시 받는 말
+    shaky = lambda t: any(k in t for k in FILL_SAY)
     pick, miss = align_voice.align(pcm, phrases, texts, key, fp[:-4] + '.heard2.json')
-    out = {p: cut(pcm, a, b) for p, (a, b) in pick.items()}
+    out = {p: cut(pcm, a, b) for p, (a, b) in pick.items() if not shaky(speak_text(p))}
     # 예전에 받아 둔 '빠진 줄' 녹음들
     import glob
     for ffp in sorted(glob.glob(os.path.join(CACHE, f"gemini_{voice['id']}_fill*.pcm"))):
         ft = json.load(open(ffp[:-4] + '.texts.json'))
-        fphr = [by_text[t] for t in ft if t in by_text]
-        if not fphr:
+        by_fill = {fill_text(p): p for p in phrases}
+        fphr = [by_text.get(t) or by_fill.get(t) for t in ft]
+        if not all(fphr):
             continue
         fpcm = array.array('h', open(ffp, 'rb').read())
-        fpick, _ = align_voice.align(fpcm, fphr, [speak_text(p) for p in fphr], key, ffp[:-4] + '.heard2.json')
+        fpick, _ = align_voice.align(fpcm, fphr, ft, key, ffp[:-4] + '.heard2.json')
         for p, (a, b) in fpick.items():
-            out.setdefault(p, cut(fpcm, a, b))
+            if not shaky(ft[fphr.index(p)]):
+                out.setdefault(p, cut(fpcm, a, b))
     miss = [p for p in phrases if p not in out]
     if fill and miss:
         if resplit:
             print(f"  {voice['id']}: 빠진 {len(miss)}개는 --fill로 다시 녹음해야 합니다 (--resplit은 호출하지 않음)", file=sys.stderr)
         else:
-            ftexts = [speak_text(p) for p in miss]
+            ftexts = [fill_text(p) for p in miss]
             fpcm, ffp = gemini_record(voice, ftexts, 'fill', False)
             fpick, _ = align_voice.align(fpcm, miss, ftexts, key, ffp[:-4] + '.heard2.json')
             for p, (a, b) in fpick.items():
