@@ -9,7 +9,7 @@ Gemini TTS는 긴 목록을 읽을 때 줄을 건너뛰거나 순서를 바꾸�
 import array, base64, io, json, math, os, re, subprocess, sys, time, urllib.request, wave
 
 SR = 24000
-MODEL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+MODEL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
 BATCH = 30
 
 DIG = '영일이삼사오육칠팔구'
