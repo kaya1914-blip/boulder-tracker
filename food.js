@@ -32,6 +32,9 @@ function qtyText(q) {
 }
 
 // ---------- 그날의 끼니 구성 ----------
+// 매일 같은 끼니 고정: { 끼니 id: [음식들] } (설정 · 사람마다)
+const fixedMeals = () => (isObj(state.settings.fixedMeals) ? state.settings.fixedMeals : {});
+const sameItems = (a, b) => a.length === b.length && a.every((x, i) => sameFoodItem(x, b[i]) && x.q === b[i].q);
 function isGymDay(date) { const s = S(sessOn(date)); return !!(s && s.gym); }
 // 암장 날 끼니 방식 (설정 · 사람마다): 운동 전에 못 먹으면 '퇴근 후' 구성
 const afterWork = () => state.settings.preMeal === 'no';
@@ -71,8 +74,12 @@ function slotsFor(date) {
       if (m.id === 'd') tip = `오늘 추천 · ${PLAN.dinners[dinnerDefault(date)].n}`;
       if (dayTime && m.id === 'l') { sug = PLAN.meals.dayWorkoutLunch.slice(); t = '점심 (운동 2시간 전)'; tip = '또는 김밥 2줄'; }
       else if (m.id === 'l' && cafeToday(date)) { sug = cafeItems(date); t = '점심 · 회사 급식'; tip = '안 먹은 건 ✕, 더 먹은 건 +'; cafe = true; }
+      // 매일 같은 끼니로 고정해 둔 것 (급식 메뉴가 있는 점심은 급식이 먼저)
+      const fx = fixedMeals()[m.id];
+      let fixed = false;
+      if (fx && fx.length && !cafe && !(dayTime && m.id === 'l')) { sug = fx.map(it => Object.assign({}, it, { q: it.q })); tip = '매일 이대로 (고정)'; fixed = true; }
       if (gym && pf.fast && m.id === (afterWork() ? 'i' : dayTime ? 'n' : 'e')) sug = sug.concat([PLAN.meals.fastLossExtra[afterWork() ? 'after' : 'pre']]);
-      return { id: m.id, t, tip, sug, cafe };
+      return { id: m.id, t, tip, sug, cafe, fixed };
     });
   // 예전 기록에만 있는 끼니 칸(운동 전 간식 등)은 기록이 있을 때만 그대로 보여 줌
   const fd = day(date).food || {}, ids = new Set(list.map(x => x.id));
@@ -92,8 +99,11 @@ const CAFE_RICE = /^(쌀|흰|흰쌀|백미|잡곡|현미|흑미|보리|기장|�
 // 밥이 따로 안 나오는 한 그릇 메뉴
 const CAFE_ONEBOWL = /라이스|덮밥|비빔밥|볶음밥|김밥|국밥|짜장|짬뽕|우동|국수|냉면|파스타|스파게티|리조또|오므라이스|주먹밥|떡볶이/;
 function cafeItems(date) {
-  const rq = riceQty(date);
-  return (cafeMenus()[date] || []).map(d => ({ n: d.n, k: d.k, p: d.p, u: d.u || '1인분', q: d.rice ? rq : 1 })).filter(it => it.q > 0);
+  // 그날 밥 양에서, 급식 반찬이 기본 반찬(회사 급식 반찬 1식)보다 무거운(가벼운) 만큼 밥을 0.5공기 단위로 줄임(늘림). 밥은 최소 0.5공기
+  const list = cafeMenus()[date] || [], sidesK = list.filter(d => !d.rice).reduce((a, d) => a + (d.k || 0), 0);
+  const adj = Math.round((sidesK - FOOD_MAP.sides.k) / PLAN.meals.riceKcal * 2) / 2;
+  const rq = Math.max(0.5, Math.min(2, riceQty(date) - adj));
+  return list.map(d => ({ n: d.n, k: d.k, p: d.p, u: d.u || '1인분', q: d.rice ? rq : 1 })).filter(it => it.q > 0);
 }
 // 메뉴를 붙여넣을 주: 주말이면 다음 주, 평일이면 이번 주
 function cafeDefaultMon(today = todayStr()) { const w = dow(today); return w === 0 || w === 6 ? addDays(mondayOf(today), 7) : mondayOf(today); }
@@ -304,7 +314,7 @@ function dietNotes(date) {
 }
 const sumItems = items => items.reduce((a, it) => { const f = foodOf(it); a.k += f.k * it.q; a.p += f.p * it.q; return a; }, { k: 0, p: 0 });
 // 추천 구성: [음식 id, 수량] 또는 급식처럼 값이 직접 적힌 { n, k, p, u, q }
-const sugItems = sug => sug.map(x => (Array.isArray(x) ? { f: x[0], q: x[1] } : { n: x.n, k: x.k, p: x.p, u: x.u, q: x.q }));
+const sugItems = sug => sug.map(x => (Array.isArray(x) ? { f: x[0], q: x[1] } : x.f ? { f: x.f, q: x.q } : { n: x.n, k: x.k, p: x.p, u: x.u, q: x.q }));
 function foodTotals(date) {
   const fd = day(date).food || {};
   const all = Object.values(fd).flat();
@@ -329,6 +339,7 @@ function dietCard(date) {
     ${sessOn(date) ? '' : '<p class="hint">세션을 고르기 전이라 쉬는 날 기준으로 보여줍니다.</p>'}
     ${tg.auto.none ? `<button class="nag" data-act="tab" data-tab="settings">${ic('scale')}체중·키·나이를 넣으면 칼로리와 단백질 목표가 내 몸에 맞춰집니다 · 설정</button>` : ''}
     ${dietNotes(date).map(n => `<p class="note">${ic('spark')}${n}</p>`).join('')}
+    ${(() => { const n = slots.filter(sl => sl.sug.length && !(fd[sl.id] || []).length).length; return n >= 2 ? `<button class="btn wide fill-all" data-act="f-fill-all" data-date="${date}">${ic('check')}남은 ${n}끼 한 번에 기록 <small>급식·고정·추천대로 · 다르게 먹은 끼니만 고치기</small></button>` : ''; })()}
     <div class="slots">${slots.map(sl => slotBlock(date, sl, fd[sl.id] || [])).join('')}</div>
     <p class="hint">칼로리는 음식 DB의 대략치입니다. 피할 것 · ${PLAN.avoid}</p>
   </section>`;
@@ -338,11 +349,14 @@ function slotBlock(date, sl, items) {
   const t = sumItems(items), sg = sumItems(sugItems(sl.sug));
   const sugText = sugItems(sl.sug).map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')} ${qtyText(it.q)}`).join(' + ');
   const key = date + ':' + sl.id, open = openSlots().has(key);
-  if (!items.length && !open) { // 아직 안 먹은 끼니: 접어 두고 미기록 표시
-    return `<button class="slot slot-min slot-empty" data-act="f-open" data-date="${date}" data-slot="${sl.id}" aria-label="${sl.t} 기록하기">
-      <span class="sm-l"><b>${sl.t}</b><small>${sl.sug.length ? `아직 기록 안 함 · 추천 ${Math.round(sg.k)}kcal` : '아직 기록 안 함'}</small></span>
-      <span class="sm-todo">기록하기</span>
-      <span class="sm-chev">${ic('chevR')}</span></button>`;
+  if (!items.length && !open) { // 아직 안 먹은 끼니: 접어 두고, 추천(또는 급식·고정 끼니)대로 한 번에 기록하는 버튼
+    const what = sl.cafe ? '급식' : sl.fixed ? '고정' : '추천';
+    return `<div class="slot slot-min slot-empty">
+      <button class="sm-main" data-act="f-open" data-date="${date}" data-slot="${sl.id}" aria-label="${sl.t} 음식 골라 기록하기">
+        <span class="sm-l"><b>${sl.t}</b><small>${sl.sug.length ? `${what} ${Math.round(sg.k)}kcal · ${esc(sugText)}` : '아직 기록 안 함 · 눌러서 고르기'}</small></span></button>
+      ${sl.sug.length ? `<button class="sm-quick" data-act="f-sug" data-date="${date}" data-slot="${sl.id}" aria-label="${sl.t} ${what}대로 기록">${ic('check')}${what}대로</button>`
+        : `<button class="sm-todo" data-act="f-open" data-date="${date}" data-slot="${sl.id}">기록하기</button>`}
+    </div>`;
   }
   if (items.length && !open) {
     const names = items.map(it => `${foodOf(it).n.replace(/ \(.*\)$/, '')}${it.q !== 1 ? ' ' + qtyText(it.q) : ''}`).join(' · ');
@@ -366,6 +380,7 @@ function slotBlock(date, sl, items) {
     <div class="slot-act">
       <button class="sa-btn" data-act="f-open" data-date="${date}" data-slot="${sl.id}">${ic('plus')}음식 추가</button>
       ${myCombos().length ? `<button class="sa-btn" data-act="f-combos" data-date="${date}" data-slot="${sl.id}">${ic('stack')}내 조합</button>` : ''}
+      ${items.length ? `<button class="sa-btn ${fixedMeals()[sl.id] && sameItems(fixedMeals()[sl.id], items) ? 'on' : ''}" data-act="f-fix" data-date="${date}" data-slot="${sl.id}">${ic('target')}${fixedMeals()[sl.id] && sameItems(fixedMeals()[sl.id], items) ? '매일 이대로 (고정됨)' : '매일 이대로'}</button>` : ''}
       ${items.length ? `<button class="sa-btn" data-act="f-combo-save" data-date="${date}" data-slot="${sl.id}">${ic('copy')}조합 저장</button>` : ''}
       ${sl.id === 'd' ? `<button class="sa-btn" data-act="f-dinners" data-date="${date}">${ic('food')}추천 메뉴 보기</button>` : ''}
       ${items.length ? `<button class="sa-btn ghost" data-act="f-clear" data-date="${date}" data-slot="${sl.id}">비우기</button>` : ''}<button class="sa-btn fold" data-act="f-toggle" data-key="${key}" aria-expanded="true">${ic('check')}접기</button>
@@ -628,6 +643,21 @@ document.addEventListener('click', e => {
   switch (a) {
     case 'sheet-close': return closeSheet();
     case 'f-toggle': { const k = b.dataset.key, o = openSlots(); o.has(k) ? o.delete(k) : o.add(k); return render(); }
+    case 'f-fill-all': {
+      const x = dayW(d); x.food = x.food || {};
+      let n = 0, kc = 0;
+      slotsFor(d).forEach(sl => { if (sl.sug.length && !(x.food[sl.id] || []).length) { x.food[sl.id] = sugItems(sl.sug); n++; kc += sumItems(x.food[sl.id]).k; } });
+      toast(`${n}끼 · ${Math.round(kc).toLocaleString()}kcal 기록 · 다르게 먹은 끼니만 눌러서 고치세요`);
+      return commit();
+    }
+    case 'f-fix': {
+      const items = ((day(d).food || {})[b.dataset.slot] || []).map(it => Object.assign({}, it));
+      const fm = Object.assign({}, fixedMeals()), name = (slotsFor(d).find(x => x.id === b.dataset.slot) || {}).t || '';
+      if (fm[b.dataset.slot] && sameItems(fm[b.dataset.slot], items)) { delete fm[b.dataset.slot]; toast(`${name} 고정을 풀었어요`); }
+      else { fm[b.dataset.slot] = items; toast(`${name}: 다음부터 "고정대로" 한 번에 기록돼요`); }
+      state.settings.fixedMeals = fm;
+      return commit();
+    }
     case 'f-sug': {
       const sl = slotsFor(d).find(s => s.id === b.dataset.slot);
       dayW(d).food = Object.assign(day(d).food || {}, { [sl.id]: sugItems(sl.sug) });
