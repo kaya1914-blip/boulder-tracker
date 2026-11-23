@@ -1140,6 +1140,8 @@ function viewSettings() {
         ${num('kcalGym', '암장 날 칼로리', 50, `자동 ${a.gym}`)}${num('kcalRest', '쉬는 날 칼로리', 50, `자동 ${a.rest}`)}
         ${num('protein', '단백질 (g/일)', 5, `자동 ${a.protein}`)}
       </div>
+      <div class="field"><span>한 끼 밥 양</span><div class="seg" role="group" aria-label="한 끼 밥 양">${[[0, '자동'], [0.5, '½공기'], [2 / 3, '⅔공기'], [1, '1공기']].map(([v, l]) => { const on = v ? Math.abs((st.riceBowl || 0) - v) < 0.01 : !isNum(st.riceBowl); return `<button class="${on ? 'on' : ''}" data-act="f-rice" data-v="${v}" aria-pressed="${on}">${l}</button>`; }).join('')}</div></div>
+      <p class="hint">${isNum(st.riceBowl) ? `점심·저녁 추천과 급식 점심, "한 번에 기록"이 밥 ${qtyText(st.riceBowl)}공기로 들어갑니다. 칼로리 목표보다 모자라면 반찬·단백질로 채우세요.` : '자동: 목표 칼로리에 맞춰 끼니마다 밥 양을 0.5공기 단위로 정합니다. 평소 먹는 양이 정해져 있으면 골라 두세요.'}</p>
       <div class="field"><span>암장 가기 전 식사</span>${seg('preMeal', [['yes', '먹을 수 있음'], ['no', '어려움 (퇴근 후 바로)']])}</div>
       <p class="hint">${st.preMeal === 'no' ? '운동 전 간식 칸 없이 점심을 든든히, 운동 중 마시는 것(스포츠음료·두유), 운동 직후 단백질 음료로 추천합니다.' : '운동 1~1.5시간 전 계란, 30분 전 바나나처럼 운동 전 간식을 넣어 추천합니다. 퇴근 후 바로 가서 못 먹는다면 "어려움"을 고르세요.'} 이 설정은 이 기기(나)에만 적용됩니다.</p>
       <p class="hint">비워 두면 자동으로 계산합니다. 지금 목표: 암장 날 <b>${tg.gym}kcal</b> · 쉬는 날 <b>${tg.rest}kcal</b> · 단백질 <b>${tg.protein}g</b>. ${a.none ? '체중을 넣으면 계산을 시작합니다.' : a.bmr ? `기초대사량 ${a.bmrVal}kcal(${{ inbody: '인바디 측정값', fat: '인바디 체지방률 · 제지방량 기준', mifflin: '성별·나이·키·최근 7일 체중' }[a.src]}) × 활동량` + (goalOf() === 'cut' ? ' × 0.82 (감량)' : goalOf() === 'gain' ? ' × 1.1 (증량)' : '') + '으로 계산했어요.' : '성별·나이·키를 넣으면 더 정확해집니다 (지금은 체중만으로 추정).'} 끼니 추천의 밥 양도 이 목표에 맞춰 늘거나 줄어듭니다.</p>

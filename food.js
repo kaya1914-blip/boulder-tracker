@@ -39,7 +39,10 @@ function isGymDay(date) { const s = S(sessOn(date)); return !!(s && s.gym); }
 // 암장 날 끼니 방식 (설정 · 사람마다): 운동 전에 못 먹으면 '퇴근 후' 구성
 const afterWork = () => state.settings.preMeal === 'no';
 const gymMealKey = () => (afterWork() ? 'gymAfterWork' : 'gym');
+// 한 끼 밥 양을 직접 정했으면(설정 · 사람마다) 그 양, 아니면 목표 칼로리에 맞춰 자동
+const myRice = () => (isNum(state.settings.riceBowl) && state.settings.riceBowl > 0 ? state.settings.riceBowl : null);
 function riceQty(date) {
+  if (myRice()) return myRice();
   const gym = isGymDay(date), m = PLAN.meals, k = gym ? 'gym' : 'rest';
   let q = m.rice[k];
   // 내 목표 칼로리와 기준 칼로리의 차이를 밥 양으로 맞춤 (밥이 들어가는 끼니 2번에 나눠서, 0.5공기 단위)
@@ -52,8 +55,9 @@ function riceQty(date) {
   return Math.max(0, Math.min(2, Math.round(q * 2) / 2));
 }
 function dinnerDefault(date) {
-  const n = PLAN.dinners.length;
-  return ((diffDays(date, '2026-01-01') % n) + n) % n;
+  // 밥 양을 직접 정했으면 밥이 따로 붙는 메뉴만 돌려 가며 추천 (정식·국밥처럼 밥 1공기가 들어 있는 메뉴는 빼고)
+  const idx = PLAN.dinners.map((d, i) => i).filter(i => !myRice() || PLAN.dinners[i].rice), n = idx.length;
+  return idx[((diffDays(date, '2026-01-01') % n) + n) % n];
 }
 function dinnerItems(idx, date) {
   const d = PLAN.dinners[idx];
@@ -102,7 +106,7 @@ function cafeItems(date) {
   // 그날 밥 양에서, 급식 반찬이 기본 반찬(회사 급식 반찬 1식)보다 무거운(가벼운) 만큼 밥을 0.5공기 단위로 줄임(늘림). 밥은 최소 0.5공기
   const list = cafeMenus()[date] || [], sidesK = list.filter(d => !d.rice).reduce((a, d) => a + (d.k || 0), 0);
   const adj = Math.round((sidesK - FOOD_MAP.sides.k) / PLAN.meals.riceKcal * 2) / 2;
-  const rq = Math.max(0.5, Math.min(2, riceQty(date) - adj));
+  const rq = myRice() || Math.max(0.5, Math.min(2, riceQty(date) - adj)); // 밥 양을 직접 정했으면 그대로
   return list.map(d => ({ n: d.n, k: d.k, p: d.p, u: d.u || '1인분', q: d.rice ? rq : 1 })).filter(it => it.q > 0);
 }
 // 메뉴를 붙여넣을 주: 주말이면 다음 주, 평일이면 이번 주
@@ -190,8 +194,9 @@ function cafeDish(raw) {
   return d;
 }
 function cafeDayLine(date, list) {
-  const t = list.reduce((a, d) => ({ k: a.k + d.k, p: a.p + d.p }), { k: 0, p: 0 });
-  return `<li><div class="cf-h"><b>${md(date)} ${DOW[dow(date)]}</b><span>${Math.round(t.k).toLocaleString()}kcal · ${Math.round(t.p)}g <small>(밥 1공기 기준)</small></span></div>
+  const rq = myRice() || 1; // 미리보기 합계: 내 밥 양 기준 (자동이면 1공기 기준)
+  const t = list.reduce((a, d) => { const q = d.rice ? rq : 1; return { k: a.k + d.k * q, p: a.p + d.p * q }; }, { k: 0, p: 0 });
+  return `<li><div class="cf-h"><b>${md(date)} ${DOW[dow(date)]}</b><span>${Math.round(t.k).toLocaleString()}kcal · ${Math.round(t.p)}g <small>(밥 ${qtyText(rq)}공기 기준)</small></span></div>
     <small>${list.map(d => `${esc(d.n)} ${d.k}${d.unk ? ' <em class="bad">칼로리 모름 · 숫자를 붙여 주세요</em>' : d.auto ? ' <em>자동 추가</em>' : d.est && d.est !== d.n ? ` <em>추정·${esc(d.est.replace(/ \(.*\)$/, ''))}</em>` : ''}`).join(' · ')}</small></li>`;
 }
 // ---------- 메뉴판 사진 → 글 (선택 · 내 Gemini 키) ----------
@@ -792,6 +797,12 @@ document.addEventListener('click', e => {
     }
     case 'f-ai-key-del': if (confirm('이 폰에 저장한 Gemini 키를 지울까요?')) { setAiKey(''); render(); } return;
     case 'f-cafe-meal': ui.cafeMeal = b.dataset.v; return render();
+    case 'f-rice': {
+      const v = +b.dataset.v;
+      state.settings.riceBowl = v > 0 ? v : null;
+      toast(v > 0 ? `한 끼 밥 ${qtyText(v)}공기로 추천·기록합니다` : '밥 양을 목표 칼로리에 맞춰 자동으로 정합니다');
+      return commit();
+    }
     case 'f-cafe-ask': {
       const t = geminiAsk(ui.cafeMeal || '중식');
       const done = () => toast('요청문을 복사했어요 · Gemini 앱에 사진과 함께 붙여넣으세요');

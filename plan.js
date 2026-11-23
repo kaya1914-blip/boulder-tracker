@@ -23,6 +23,7 @@ const PLAN = {
     gradeColor: null,          // 색 기준에서 고른 색 번호
     level: null,               // 클라이밍 레벨 V0~V10 (null이면 고르기 전 · 계산은 V4 기준)
     cafeOn: false,             // 회사 급식 메뉴 쓰기 (켜면 점심 추천이 붙여넣은 그 주 급식으로 바뀜)
+    riceBowl: null,            // 한 끼 밥 양(공기). 비우면 목표 칼로리에 맞춰 자동
     preMeal: 'yes',            // 암장 가기 전 식사: 'yes' 먹을 수 있음 · 'no' 어려움(퇴근 후 바로 → 운동 중 마실 것으로)
   },
   defaultLevel: 4,
