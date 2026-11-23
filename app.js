@@ -3,7 +3,7 @@
 
 // ---------- 저장 ----------
 const KEY = 'bt.v1';
-const APP_VERSION = 'v47'; // 배포할 때 sw.js의 CACHE와 함께 올림
+const APP_VERSION = 'v48'; // 배포할 때 sw.js의 CACHE와 함께 올림
 function freshState() {
   return normalize({ v: 1, settings: {}, days: {}, weeks: {}, meta: {}, timer: {} });
 }
@@ -70,6 +70,7 @@ function bodyBits(x) {
   const out = [];
   ['finger', 'elbow', 'sore', 'sick'].forEach(k => { const l = lvOf(x[k]); if (l) out.push(`${k === 'sick' ? '아픔' : PLAN.pain.items[k].t}(${lvName(l)})`); });
   if (x.weak) out.splice(Math.min(out.length, 2), 0, '힘 떨어짐');
+  if (!out.length && x.ok) out.push('이상 없음');
   return out;
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -701,7 +702,8 @@ function morningCard(date) {
       ${bigStepper(date, 'weight', '체중', 'kg', 0.1, lw != null ? String(lw) : '—')}
       ${bigStepper(date, 'sleep', '수면', '시간', 0.5, '—')}
     </div>
-    <div class="chips">${painChip(date, 'finger')}${painChip(date, 'elbow')}${painChip(date, 'sore')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}${painChip(date, 'sick')}</div>
+    <div class="chips"><button class="chipbtn ok ${x.ok ? 'on' : ''}" data-act="body-ok" data-date="${date}" aria-pressed="${!!x.ok}">${ic('check')}이상 없음</button>${painChip(date, 'finger')}${painChip(date, 'elbow')}${painChip(date, 'sore')}${toggleChip(date, 'weak', '힘 떨어짐', 'battery')}${painChip(date, 'sick')}</div>
+    ${!x.ok && !bodyBits(x).length ? '<p class="hint">아픈 데가 없으면 "이상 없음"을 눌러 두세요. 기록이 없는 날과 구분돼 손가락·팔꿈치 이상을 더 빨리 알아챕니다.</p>' : ''}
     ${painLevels(date)}
     ${lvOf(x.sick) === 1 ? `<p class="warn">${ic('moon')}가벼운 증상이면 고강도만 쉬고 가볍게 움직여도 됩니다. 열·몸살이 오면 바로 쉬세요.</p>` : lvOf(x.sick) >= 2 ? `<p class="warn">${ic('moon')}아픈 날은 운동을 쉬고 물을 충분히 드세요. 열이 나거나 3일 넘게 낫지 않으면 진료를 받으세요.</p>` : ''}
     ${lvOf(x.finger) >= 2 || lvOf(x.elbow) >= 2 ? `<p class="warn">${ic('alert')}통증이 3일 넘게 가거나, 붓기·딸깍 소리·힘이 갑자기 빠지는 느낌이 있으면 운동을 멈추고 정형외과(스포츠의학) 진료를 받으세요. 이 앱의 추천은 의학적 진단이 아닙니다.</p>` : ''}
@@ -1053,6 +1055,7 @@ function buildReport(mon) {
   L.push(`- 암장 ${s.gymDone}회, 운동 세션 ${s.done}회, 고강도 연속 ${s.consec}회${s.busy ? ', 바쁜 주' : ''}`);
   L.push(`- 체중 주 평균 ${f1(s.avg)}kg (기록 ${s.weights.length}일), 지난주 ${f1(v.p.avg)}kg`);
   L.push(`- 수면 평균 ${isNum(s.sleepAvg) ? s.sleepAvg.toFixed(1) + '시간' : '-'}, 6시간 미만 ${s.short}일`);
+  L.push(`- 몸 상태 기록 ${weekDates(mon).filter(d => bodyBits(day(d)).length).length}/7일 ('-'는 기록 안 한 날, 아픈 데 없이 체크한 날은 '이상 없음')`);
   L.push(`- 볼륨 완등 최고 ${s.brownMax ?? '-'}개`);
   { const ls = weekDates(mon).map(loadOf).filter(Boolean); L.push(`- 운동량(시간×RPE) 합계 ${ls.reduce((a, l) => a + l.au, 0).toLocaleString()} · 시간·RPE 직접 기록 ${ls.filter(l => l.logged).length}/${ls.length}일`); }
   { const dt = s.diet, tg = targets(addDays(mon, 6)); L.push(`- 식단 기록 ${dt.logged}일 · 평균 단백질 ${isNum(dt.p) ? Math.round(dt.p) + 'g' : '-'} / ${tg.protein}g · 암장 날 평균 ${isNum(dt.kGym) ? Math.round(dt.kGym) + 'kcal' : '-'} / ${tg.gym} · 쉬는 날 평균 ${isNum(dt.kRest) ? Math.round(dt.kRest) + 'kcal' : '-'} / ${tg.rest}`); }
@@ -1316,8 +1319,15 @@ document.addEventListener('click', e => {
       save(); return render();
     }
     case 'upd-apply': return location.reload();
+    case 'body-ok': {
+      const x = dayW(d);
+      x.ok = !x.ok;
+      if (x.ok) ['finger', 'elbow', 'sore', 'sick', 'weak'].forEach(k => delete x[k]); // 이상 없음 = 통증·아픔 기록 지움
+      return commit();
+    }
     case 'flag': {
       const x = dayW(d), k = b.dataset.k;
+      delete x.ok; // 아픈 데를 고르면 '이상 없음'은 해제
       if (PLAN.pain.items[k]) { if (lvOf(x[k])) delete x[k]; else x[k] = 1; } // 정도가 있는 항목: 처음 누르면 '조금'
       else x[k] = !x[k];
       return commit();
