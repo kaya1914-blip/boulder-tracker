@@ -146,7 +146,7 @@ const CAFE_GUESS = [
   [/나물|무침|겉절이|생채|샐러드|쌈/, 40, 2, '나물·무침'],
   [/계란|달걀|두부|메추리알/, 150, 11, '계란·두부'],
   [/어묵|오뎅/, 120, 6, '어묵'],
-  [/햄|소시지|스팸|베이컨/, 200, 8, '햄'],
+  [/햄|소시지|소세지|비엔나|스팸|베이컨/, 200, 8, '햄'],
   [/멸치|진미채|건새우|쥐포/, 90, 7, '멸치·진미'],
   [/잡채|떡|전$|부침|파전|감자채/, 200, 5, '전·잡채'],
   [/버섯|감자|연근|우엉|가지|호박|무조림|야채|채소|콩나물|숙주|브로콜리|곤약/, 70, 2, '채소 반찬'],
@@ -184,6 +184,96 @@ function cafeDayLine(date, list) {
   return `<li><div class="cf-h"><b>${md(date)} ${DOW[dow(date)]}</b><span>${Math.round(t.k).toLocaleString()}kcal · ${Math.round(t.p)}g <small>(밥 1공기 기준)</small></span></div>
     <small>${list.map(d => `${esc(d.n)} ${d.k}${d.unk ? ' <em class="bad">칼로리 모름 · 숫자를 붙여 주세요</em>' : d.auto ? ' <em>자동 추가</em>' : d.est && d.est !== d.n ? ` <em>추정·${esc(d.est.replace(/ \(.*\)$/, ''))}</em>` : ''}`).join(' · ')}</small></li>`;
 }
+// ---------- 메뉴판 사진 → 글 (선택 · 내 Gemini 키) ----------
+// 앱이 공개돼 있어 키를 코드에 넣을 수 없으므로, 쓰는 사람이 자기 폰에 한 번 넣음. 키는 상태(state)와 따로 저장해 백업 파일에 들어가지 않음
+const AI_KEY = 'bt.aikey';
+// 무료 모델을 차례로: 한도가 차거나(429) 모델이 없어지면(404) 다음 모델로. 모델마다 무료 한도가 따로
+const AI_MODELS = ['gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+const aiUrl = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
+const aiKey = () => { try { return localStorage.getItem(AI_KEY) || ''; } catch (e) { return ''; } };
+function setAiKey(k) { try { if (k) localStorage.setItem(AI_KEY, k); else localStorage.removeItem(AI_KEY); } catch (e) { toast('이 브라우저에는 키를 저장할 수 없어요'); } }
+// Gemini 앱(채팅)에 사진과 같이 보낼 요청문: 이 앱의 붙여넣기 형식 그대로, 칼로리·단백질까지 붙여 달라고
+function geminiAsk(meal) {
+  return `이 사진은 회사 구내식당 주간 식단표야. "${meal}" 메뉴만 요일별로 읽어서, 메뉴마다 구내식당 1인분 기준 칼로리와 단백질(g)을 대략 추정해 줘.
+아래 형식 그대로, 설명 없이 결과만 코드 블록 하나로 줘. 한 줄에 하루씩, 메뉴는 쉼표로 구분, 메뉴 이름 뒤에 "칼로리/단백질" 숫자만.
+월: 시락국 70/4, 열무된장무침 45/2, 돈육간장불고기 300/20
+화: …
+사진에 날짜가 있으면 요일 앞에 "11/23 월:"처럼 붙여 줘. 밥이 따로 적혀 있지 않으면 밥은 넣지 마. 원산지 표시는 빼.`;
+}
+function photoBox() {
+  if (ui.cafeBusy) return `<div class="photo-box"><p class="hint">${ic('timer')}식단표를 읽는 중… 표를 꼼꼼히 보느라 1~2분 걸려요. 화면을 켜 둔 채 기다려 주세요.</p></div>`;
+  const meal = ui.cafeMeal || '중식';
+  const mealSeg = `<div class="seg" role="group" aria-label="읽을 끼니">${['조식', '중식', '석식'].map(m => `<button class="${meal === m ? 'on' : ''}" data-act="f-cafe-meal" data-v="${m}" aria-pressed="${meal === m}">${m}</button>`).join('')}</div>`;
+  // 키 없이: Gemini 앱에 사진 + 요청문 → 받은 결과를 아래 칸에 붙여넣기
+  const viaApp = `<h3 class="h3">Gemini 앱으로 (키 필요 없음)</h3>
+    <p class="hint">① 아래 버튼으로 요청문을 복사 → ② Gemini 앱에 식단표 사진과 함께 붙여넣어 보내기 → ③ 받은 결과를 복사해 아래 "주간 메뉴" 칸에 붙여넣고 미리보기 · 저장. 칼로리·단백질까지 붙어서 옵니다.</p>
+    <button class="btn wide" data-act="f-cafe-ask">${ic('copy')}Gemini에게 보낼 요청문 복사 (${meal})</button>`;
+  if (!aiKey()) return `<div class="photo-box">${mealSeg}${viaApp}<h3 class="h3">앱에서 바로 사진 읽기 (선택)</h3>
+    <p class="hint">Google AI Studio에서 받은 <b>Gemini API 키</b>를 넣으면 이 화면에서 사진을 찍어 바로 채웁니다(1~2분). 키는 <b>이 폰에만</b> 저장되고 백업 파일에는 들어가지 않습니다.</p>
+    <label class="field"><span>Gemini API 키</span><input type="password" id="aiKey" autocomplete="off" placeholder="AI Studio에서 복사한 키"></label>
+    <button class="btn" data-act="f-ai-key">${ic('check')}키 저장</button></div>`;
+  return `<div class="photo-box">${mealSeg}<h3 class="h3">앱에서 바로 사진 읽기</h3>
+    <label class="btn primary wide photo-btn">${ic('target')}식단표 사진 찍기 · 고르기<input type="file" id="cafePhoto" accept="image/*" hidden></label>
+    <p class="hint">사진의 <b>${meal}</b> 메뉴를 요일별로 읽어 아래 칸에 채웁니다(칼로리·단백질은 구내식당 1인분 대략치). 저장 전에 미리보기로 확인하세요. 사진은 Google Gemini로 보내 읽습니다. <button class="link-sm" data-act="f-ai-key-del">키 지우기</button></p>${viaApp}</div>`;
+}
+// 사진을 1600px 이하 JPEG로 줄여 base64로
+function shrinkImage(file, max = 1600) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const sc = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('사진을 열지 못했어요')); };
+    img.src = url;
+  });
+}
+// Gemini가 돌려준 JSON → 붙여넣기 형식 ("11/23 월: 물만두국 250/8, …")
+function menuJsonToText(j) {
+  return ((j && j.days) || []).filter(d => d && (d.dishes || []).length).map(d => {
+    const dt = String(d.date || '').match(/\d{1,2}[/.]\d{1,2}/), wd = String(d.day || '').trim().charAt(0);
+    const head = [dt ? dt[0] : '', /[월화수목금토일]/.test(wd) ? wd : ''].filter(Boolean).join(' ');
+    const dishes = d.dishes.map(x => {
+      const n = String((x && x.n) || '').replace(/[,:·\n]/g, ' ').replace(/\s+/g, ' ').trim(), k = Math.round(+x.k), pr = Math.round(+x.p);
+      return n && (k > 0 ? `${n} ${k}/${pr > 0 ? pr : 0}` : n);
+    }).filter(Boolean);
+    return head && dishes.length ? `${head}: ${dishes.join(', ')}` : '';
+  }).filter(Boolean).join('\n');
+}
+async function readMenuPhoto(file) {
+  const key = aiKey();
+  if (!file || !key) return;
+  ui.cafeBusy = true; render();
+  try {
+    const data = await shrinkImage(file), meal = ui.cafeMeal || '중식';
+    const prompt = `회사 구내식당 주간 식단표 사진입니다. "${meal}" 메뉴만 요일별로 읽어 주세요. 표의 열·행 구조를 보고 요일과 끼니를 정확히 구분하세요.
+JSON으로만 답하세요: {"days":[{"day":"월","date":"사진에 날짜가 있으면 11/23 형식, 없으면 빈 문자열","dishes":[{"n":"메뉴 이름(사진 글자 그대로)","k":구내식당 1인분 추정 칼로리(정수),"p":단백질 추정 g(정수)}]}]}
+규칙: 사진에 없는 메뉴는 넣지 마세요. 밥이 따로 적혀 있지 않으면 밥은 넣지 마세요. 원산지·알레르기 표시는 빼세요. 그 끼니가 없는 요일은 빼세요.`;
+    const body = m => JSON.stringify({ contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data } }, { text: prompt }] }],
+      generationConfig: Object.assign({ responseMimeType: 'application/json', temperature: 0 }, m === 'gemini-flash-latest' ? { thinkingConfig: { thinkingLevel: 'low' } } : {}) });
+    let res = null;
+    for (const m of AI_MODELS) {
+      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 180000);
+      try { res = await fetch(aiUrl(m), { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: body(m), signal: ctl.signal }); }
+      catch (err) { throw new Error(err && err.name === 'AbortError' ? '3분이 지나도 답이 없어요. 잠시 뒤 다시 해 주세요' : '인터넷 연결을 확인해 주세요'); }
+      finally { clearTimeout(to); }
+      if (res.status !== 429 && res.status !== 404) break;
+    }
+    if (!res.ok) throw new Error(res.status === 429 ? '오늘 무료 사용량을 다 썼어요. 내일 다시 하거나 직접 입력하세요' : res.status === 400 || res.status === 401 || res.status === 403 ? '키가 맞지 않아요. "키 지우기" 후 다시 넣어 주세요' : `메뉴판을 읽지 못했어요 (${res.status})`);
+    const d = await res.json(), part = d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts[0];
+    const text = menuJsonToText(JSON.parse((part && part.text) || '{}'));
+    if (!text) throw new Error('메뉴를 찾지 못했어요. 식단표가 화면에 꽉 차고 글자가 잘 보이게 다시 찍어 주세요');
+    ui.cafeMon = ui.cafeMon || cafeDefaultMon();
+    ui.cafeDraft = text; ui.cafePrev = parseCafe(text, ui.cafeMon);
+    toast(`${Object.keys(ui.cafePrev.days).length}일 메뉴를 읽었어요 · 확인하고 저장하세요`);
+  } catch (e) { toast((e && e.message) || '메뉴판을 읽지 못했어요'); }
+  ui.cafeBusy = false; render();
+}
+document.addEventListener('change', e => { if (e.target && e.target.id === 'cafePhoto') { const f = e.target.files[0]; e.target.value = ''; readMenuPhoto(f); } });
+
 function cafeCard() {
   const on = !!state.settings.cafeOn;
   const head = `<section class="card" id="cafe"><div class="card-h"><h2>회사 급식</h2><span class="muted">${on ? '켜짐' : '꺼짐 · 직접 입력'}</span></div>
@@ -192,7 +282,8 @@ function cafeCard() {
   const mon = ui.cafeMon || cafeDefaultMon(), pv = ui.cafePrev;
   const saved = Object.keys(cafeMenus()).sort();
   const weeks = [...new Set(saved.map(mondayOf))].sort().reverse().slice(0, 4);
-  return head + `
+  return head + photoBox() + `
+    <h3 class="h3">직접 붙여넣기 · 고치기</h3>
     <p class="hint">한 줄에 하루씩: <code>월: 물만두국, 콩나물제육볶음 300/19, 참나물무침</code>. 반찬 뒤 숫자는 <b>칼로리/단백질</b>이고, 없으면 음식 DB로 추정합니다. 날짜(<code>11/23</code>)를 앞에 써도 됩니다. 밥이 메뉴에 없으면 1공기를 자동으로 넣고, 그날 밥 양 추천에 맞춰 줄여 줍니다.</p>
     <label class="field"><span>요일만 쓴 줄은 이 주로 넣기 (월요일)</span><input type="date" id="cafeMon" value="${mon}"></label>
     <label class="field"><span>주간 메뉴</span><textarea id="cafeTxt" rows="7" placeholder="월: 물만두국, 참나물유자청무침, 콩나물제육볶음, 새송이버섯조림&#10;화: 황태해장국, 오이양파무침, 단호박카레라이스, 생선까스">${esc(ui.cafeDraft || '')}</textarea></label>
@@ -664,6 +755,20 @@ document.addEventListener('click', e => {
       return;
     }
     case 'f-cafe-on': state.settings.cafeOn = b.dataset.v === '1'; return commit();
+    case 'f-ai-key': {
+      const k = ((document.getElementById('aiKey') || {}).value || '').trim();
+      if (k.length < 20) { toast('키를 확인해 주세요'); return; }
+      setAiKey(k); toast('키를 이 폰에 저장했어요'); return render();
+    }
+    case 'f-ai-key-del': if (confirm('이 폰에 저장한 Gemini 키를 지울까요?')) { setAiKey(''); render(); } return;
+    case 'f-cafe-meal': ui.cafeMeal = b.dataset.v; return render();
+    case 'f-cafe-ask': {
+      const t = geminiAsk(ui.cafeMeal || '중식');
+      const done = () => toast('요청문을 복사했어요 · Gemini 앱에 사진과 함께 붙여넣으세요');
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(() => prompt('아래 글을 복사하세요', t));
+      else prompt('아래 글을 복사하세요', t);
+      return;
+    }
     case 'f-cafe-prev': {
       const txt = (document.getElementById('cafeTxt') || {}).value || '', mv = (document.getElementById('cafeMon') || {}).value;
       ui.cafeMon = mv ? mondayOf(mv) : cafeDefaultMon();
