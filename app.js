@@ -3,7 +3,7 @@
 
 // ---------- 저장 ----------
 const KEY = 'bt.v1';
-const APP_VERSION = 'v47'; // 배포할 때 sw.js의 CACHE와 함께 올림
+const APP_VERSION = 'v48'; // 배포할 때 sw.js의 CACHE와 함께 올림
 function freshState() {
   return normalize({ v: 1, settings: {}, days: {}, weeks: {}, meta: {}, timer: {} });
 }
