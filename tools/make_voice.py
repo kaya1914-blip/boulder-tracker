@@ -16,6 +16,7 @@ Gemini TTS 무료 티어는 하루 호출 수가 아주 적어서(약 10회) 조
 키는 파일에 적지 말고 환경 변수로만 넘기세요.
 """
 import argparse, array, base64, hashlib, io, json, math, os, subprocess, sys, urllib.request, wave
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'voice')
@@ -98,7 +99,11 @@ def gemini_batch(voice, phrases, resplit=False):
         with open(fp, 'wb') as f:
             f.write(base64.b64decode(c['content']['parts'][0]['inlineData']['data']))
     pcm = array.array('h', open(fp, 'rb').read())
-    return split_by_silence(pcm, texts, voice['id'])
+    # 무음 순서만으로는 못 믿음(건너뛰기·순서 바뀜) → 조각을 받아 적게 해서 내용으로 짝을 맞춤
+    import align_voice
+    key = os.environ.get('GEMINI_API_KEY', '')
+    pick, miss = align_voice.align(pcm, phrases, texts, key, fp[:-4] + '.heard.json')
+    return {p: pcm[max(0, a - int(PAD * SR)): b + int(PAD * SR)] for p, (a, b) in pick.items()}
 
 
 def split_by_silence(pcm, texts, vid, thr=700, min_gap=0.25):
@@ -169,7 +174,9 @@ def build(voice, phrases, use_fake, engine, resplit):
     batch = gemini_batch(voice, phrases, resplit) if engine == 'gemini' and not use_fake else None
     clips = {}
     for i, p in enumerate(phrases):
-        c = trim(fake(p) if use_fake else batch[i] if batch else cloud_synth(voice, p))
+        if batch is not None and p not in batch:
+            continue  # 녹음에서 못 찾은 말: 묶음에서 빼면 앱이 그 문장만 폰 음성으로 읽음
+        c = trim(fake(p) if use_fake else batch[p] if batch is not None else cloud_synth(voice, p))
         clips[p] = [round(len(pcm) / SR, 4), round(len(c) / SR, 4)]
         pcm.extend(c)
         pcm.extend(sil(GAP))
