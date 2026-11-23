@@ -273,6 +273,22 @@
   check('밥 양을 정하면 저녁 추천은 밥이 따로 붙는 메뉴만', Array.from({ length: 14 }, (_, i) => PLAN.dinners[dinnerDefault(addDays('2026-11-23', i))].rice).every(Boolean));
   check('밥 ⅔공기로 정하면 점심 급식·저녁 추천 모두 ⅔공기', Math.abs(riceQty('2026-11-23') - 2 / 3) < 0.01 && Math.abs(cafeItems('2026-11-23').find(x => /^밥/.test(x.n)).q - 2 / 3) < 0.01 && /밥 ⅔공기 기준/.test(cafeDayLine('2026-11-23', state.cafe['2026-11-23'])));
 
+  // 설정 접기·순서 · 되돌리기
+  scene({}, { sex: 'm', age: 39, heightCm: 167, startWeight: 65 });
+  ui.tab = 'settings'; render();
+  const titles = [...document.querySelectorAll('#main > section.card .card-h h2')].map(h => h.textContent.trim());
+  check('설정: 식단 목표가 맨 위, 모든 카드가 접힘', titles[0] === '식단 목표' && [...document.querySelectorAll('#main > section.card')].every(c => c.classList.contains('folded')), titles.slice(0, 4).join(' / '));
+  document.querySelector('[data-act="set-fold"][data-k="식단 목표"]').click();
+  check('설정: 제목을 누르면 펼쳐지고 기억함', !document.querySelector('#main > section.card').classList.contains('folded') && state.meta.setOpen['식단 목표'] === true);
+  ui.tab = 'today';
+  scene({ '2026-11-23': { session: 'volume' } }, { preMeal: 'no' });
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fill-all"]').click();
+  const filled = Object.keys(day('2026-11-23').food || {}).length;
+  const undoBtn = document.querySelector('#toast .toast-act');
+  if (undoBtn) undoBtn.click();
+  check('"한 번에 기록" 뒤 되돌리기 → 기록 전으로', filled >= 4 && undoBtn && !Object.keys(day('2026-11-23').food || {}).length, filled);
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');

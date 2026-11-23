@@ -3,6 +3,7 @@
 
 // ---------- 저장 ----------
 const KEY = 'bt.v1';
+const APP_VERSION = 'v47'; // 배포할 때 sw.js의 CACHE와 함께 올림
 function freshState() {
   return normalize({ v: 1, settings: {}, days: {}, weeks: {}, meta: {}, timer: {} });
 }
@@ -1179,7 +1180,7 @@ function viewSettings() {
       <li>근력 세션을 집 C로 대체 → 다음 암장 날 행보드 보충 3세트</li>
       <li>레벨(V0~V10)을 바꾸면 문제 등급·행보드·풀업·록오프·집 운동 변형이 바로 바뀝니다</li>
     </ul></section>
-    <p class="foot">볼더링 트래커 · 계획 수정은 plan.js<br>이 앱의 운동·식단 추천과 체력 평가는 일반적인 훈련 정보이며 의학적 진단이나 치료를 대신하지 않습니다. 통증·부상은 전문의와 상담하세요.</p>`;
+    <p class="foot">볼더링 트래커 · 버전 ${APP_VERSION} · 계획 수정은 plan.js<br>이 앱의 운동·식단 추천과 체력 평가는 일반적인 훈련 정보이며 의학적 진단이나 치료를 대신하지 않습니다. 통증·부상은 전문의와 상담하세요.</p>`;
 }
 
 // ---------- 테마 ----------
@@ -1204,14 +1205,54 @@ const VIEWS = { today: viewToday, record: viewRecord, week: viewWeek, settings: 
 function render() {
   const main = document.getElementById('main');
   main.innerHTML = (VIEWS[ui.tab] || viewToday)();
+  if (ui.tab === 'settings') foldSettings();
   document.querySelectorAll('.tabbar [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
   renderFocus();
 }
+
+// ---------- 설정: 자주 쓰는 순서로 놓고 접기 ----------
+// 카드 제목 기준. 목록에 없는 카드는 그 뒤에 원래 순서대로. 펼친 카드는 기억(state.meta.setOpen)
+const SETTINGS_ORDER = ['식단 목표', '회사 급식', '체중 목표', '내 정보', '내 클라이밍 레벨', '나는 어떤 클라이머?', '내 운동 기구', 'Claude 주간 분석', '백업', '화면 테마', '진행표', '자동 조정 규칙'];
+function foldSettings() {
+  const main = document.getElementById('main'), foot = main.querySelector(':scope > .foot');
+  const open = (state.meta.setOpen = isObj(state.meta.setOpen) ? state.meta.setOpen : {});
+  if (!profileSet() && open['내 정보'] == null) open['내 정보'] = true; // 처음 쓰는 사람은 내 정보부터
+  const cards = [...main.querySelectorAll(':scope > section.card')].map(sec => {
+    const h = sec.querySelector(':scope > .card-h'), t = h && h.querySelector('h2');
+    return { sec, h, key: t ? t.textContent.trim() : '' };
+  }).filter(c => c.key);
+  const rank = k => { const i = SETTINGS_ORDER.indexOf(k); return i < 0 ? 99 : i; };
+  cards.slice().sort((a, b) => rank(a.key) - rank(b.key)).forEach(c => main.insertBefore(c.sec, foot || null));
+  cards.forEach(({ sec, h, key }) => {
+    const on = !!open[key];
+    sec.classList.add('foldable');
+    sec.classList.toggle('folded', !on);
+    h.dataset.act = 'set-fold'; h.dataset.k = key;
+    h.setAttribute('role', 'button'); h.tabIndex = 0; h.setAttribute('aria-expanded', String(on));
+  });
+}
 function commit() { save(); render(); }
-function toast(msg) {
+function showUpdateBar() {
+  if (document.getElementById('updBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'updBar'; bar.className = 'upd-bar';
+  bar.innerHTML = `<span>새 버전이 있어요</span><button data-act="upd-apply">적용</button>`;
+  document.body.appendChild(bar);
+}
+// 알림 한 줄. act = { label, fn } 이면 버튼(예: 되돌리기)을 붙이고 5초 동안 보여 줌
+function toast(msg, act) {
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2400);
+  t.textContent = '';
+  const m = document.createElement('span'); m.textContent = msg; t.appendChild(m);
+  t.classList.toggle('has-act', !!act);
+  if (act) {
+    const b = document.createElement('button');
+    b.className = 'toast-act'; b.textContent = act.label;
+    b.onclick = () => { t.classList.remove('show'); act.fn(); };
+    t.appendChild(b);
+  }
+  t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), act ? 5000 : 2400);
 }
 
 // ---------- 이벤트 ----------
@@ -1274,6 +1315,12 @@ document.addEventListener('click', e => {
     case 'prep-reset': if (confirm('이번 주 준비·장보기 목록을 처음 상태로 되돌릴까요?')) { delete state.prepList; return commit(); } return;
     case 'prep': { const pc = prepChecks(d, true); pc[b.dataset.id] = !pc[b.dataset.id]; return commit(); }
     case 'time': dayW(d).time = b.dataset.v; return commit();
+    case 'set-fold': {
+      const o = (state.meta.setOpen = isObj(state.meta.setOpen) ? state.meta.setOpen : {});
+      o[b.dataset.k] = !o[b.dataset.k];
+      save(); return render();
+    }
+    case 'upd-apply': return location.reload();
     case 'flag': {
       const x = dayW(d), k = b.dataset.k;
       if (PLAN.pain.items[k]) { if (lvOf(x[k])) delete x[k]; else x[k] = 1; } // 정도가 있는 항목: 처음 누르면 '조금'
@@ -1407,6 +1454,11 @@ if (!window.BT_TEST) window.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const hadCtrl = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('./sw.js').catch(() => {});
-    if (hadCtrl) navigator.serviceWorker.addEventListener('controllerchange', () => toast('새 버전으로 업데이트되었어요'));
+    // 새 버전을 받으면 띠를 띄워 한 번에 적용 (예전처럼 앱을 닫았다 다시 열 필요 없이)
+    if (hadCtrl) navigator.serviceWorker.addEventListener('controllerchange', showUpdateBar);
+    // 앱을 켜 둔 채 지내다 다시 볼 때도 새 버전이 있는지 확인
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+    });
   }
 });
