@@ -143,6 +143,8 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
     by_text = dict(zip(texts, phrases))
     cut = lambda pcm, a, b: pcm[max(0, a - int(PAD * SR)): b + int(PAD * SR)]
     pcm, fp = gemini_record(voice, texts, '', resplit)
+    if pcm is not None:
+        pcm = match_pitch(pcm, '전체 녹음')
     if pcm is None:
         raise SystemExit(f"{voice['id']}: 받아 둔 녹음이 없습니다 (--resplit은 호출하지 않음)")
     # FILL_SAY에 있는 말(예: 록오프)은 원래 발음으로 읽힌 녹음에서는 받지 않음 — 발음이 불분명해서 다시 받는 말
@@ -157,7 +159,7 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
         fphr = [by_text.get(t) or by_fill.get(t) for t in ft]
         if not all(fphr):
             continue
-        fpcm = array.array('h', open(ffp, 'rb').read())
+        fpcm = match_pitch(array.array('h', open(ffp, 'rb').read()), os.path.basename(ffp))
         fpick, _ = align_voice.align(fpcm, fphr, ft, key, ffp[:-4] + '.heard2.json')
         for p, (a, b) in fpick.items():
             if not shaky(ft[fphr.index(p)]):
@@ -168,6 +170,7 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
         tpcm, tfp = gemini_record(voice, [speak_text(p) for p in words], tag, resplit or not soft)
         if tpcm is None:
             continue
+        tpcm = match_pitch(tpcm, tag)
         tpick, _ = align_voice.align(tpcm, words, [speak_text(p) for p in words], key, tfp[:-4] + '.heard2.json')
         for p, (a, b) in tpick.items():
             out[p] = cut(tpcm, a, b)
@@ -223,6 +226,64 @@ def deess(pcm):
     return array.array('h', np.clip(y, -32767, 32767).astype(np.int16).tobytes())
 
 
+TARGET_F0 = 185.0  # 녹음마다 목소리 높이가 조금씩 달라(176~194Hz) 문장 안에서 높낮이가 튀지 않게 이 높이로 맞춤
+
+
+def median_f0(pcm):
+    import numpy as np
+    x = np.asarray(pcm, dtype=float); w = 960; out = []
+    for i in range(0, len(x) - w, w):
+        fr = x[i:i + w]
+        if np.sqrt(np.mean(fr ** 2)) < 1500:
+            continue
+        fr = fr - fr.mean(); ac = np.correlate(fr, fr, 'full')[w - 1:]; lo, hi = SR // 400, SR // 80
+        k = lo + int(np.argmax(ac[lo:hi]))
+        if ac[k] > 0.4 * ac[0]:
+            out.append(SR / k)
+    return float(np.median(out)) if out else None
+
+
+def match_pitch(pcm, name=''):
+    """녹음 하나 전체의 목소리 높이를 TARGET_F0로 (음색 유지 · 길이 그대로라 자르는 위치도 그대로)"""
+    try:
+        f0 = median_f0(pcm)
+    except ImportError:
+        return pcm
+    if not f0 or abs(12 * math.log2(TARGET_F0 / f0)) < 0.2:
+        return pcm
+    ratio = TARGET_F0 / f0
+    out = subprocess.run(['ffmpeg', '-loglevel', 'error', '-f', 's16le', '-ar', str(SR), '-ac', '1', '-i', '-',
+                          '-af', f'rubberband=pitch={ratio:.4f}:formant=preserved:pitchq=quality', '-f', 's16le', '-ar', str(SR), '-ac', '1', '-'],
+                         input=pcm.tobytes(), capture_output=True, check=True).stdout
+    y = array.array('h', out)
+    if len(y) < len(pcm):
+        y.extend(array.array('h', bytes(2 * (len(pcm) - len(y)))))
+    print(f"  {name}: 목소리 높이 {f0:.0f}Hz → {TARGET_F0:.0f}Hz", file=sys.stderr)
+    return y[:len(pcm)]
+
+
+LOUD_DB = -14.0  # 조각마다 맞출 말소리 크기 (dBFS). 녹음마다 크기가 달라 문장 안에서 소리가 튀지 않게
+
+
+def normalize(pcm, target=LOUD_DB):
+    """말소리가 나는 부분(조용한 앞뒤 제외)의 평균 크기를 target에 맞춤. 최대치는 -1dB를 넘지 않게"""
+    try:
+        import numpy as np
+    except ImportError:
+        return pcm
+    x = np.asarray(pcm, dtype=float)
+    w = int(0.02 * SR)
+    fr = [x[i:i + w] for i in range(0, len(x) - w, w)]
+    rms = np.array([np.sqrt(np.mean(f ** 2)) for f in fr]) if fr else np.array([0.0])
+    act = rms[rms > rms.max() * 0.1] if rms.max() > 0 else rms
+    cur = 20 * np.log10(np.sqrt(np.mean(act ** 2)) / 32768 + 1e-9)
+    g = 10 ** ((target - cur) / 20)
+    peak = np.abs(x).max() * g
+    if peak > 32768 * 0.89:
+        g *= 32768 * 0.89 / peak
+    return array.array('h', np.clip(x * g, -32767, 32767).astype(np.int16).tobytes())
+
+
 def trim(pcm, thr=500):
     """앞뒤 무음 자르기 (PAD만큼 여유)"""
     idx = [i for i in range(0, len(pcm), 48) if abs(pcm[i]) > thr]
@@ -244,7 +305,7 @@ def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
             continue  # 녹음에서 못 찾은 말: 묶음에서 빼면 앱이 그 문장만 폰 음성으로 읽음
         c = trim(fake(p) if use_fake else batch[p] if batch is not None else cloud_synth(voice, p))
         if not use_fake:
-            c = deess(c)
+            c = normalize(deess(c))
         clips[p] = [round(len(pcm) / SR, 4), round(len(c) / SR, 4)]
         pcm.extend(c)
         pcm.extend(sil(GAP))
