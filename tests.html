@@ -24,6 +24,7 @@
   <script src="food.js"></script>
   <script src="guide.js"></script>
   <script src="timer.js"></script>
+  <script src="voice.js"></script>
   <script>
   // 규칙을 고친 뒤 이 페이지를 열어 모두 ✓인지 확인하세요. 실제 기록은 읽거나 쓰지 않습니다.
   const res = [];
@@ -194,6 +195,147 @@
   ln = slotsFor('2026-11-24').find(x => x.id === 'l');
   check('급식 끄면 지금처럼 직접 입력 추천', !ln.cafe && Array.isArray(ln.sug[0]));
 
+  // 집 운동 순서·방법
+  scene({});
+  const aIds = getSteps('homeA', '2026-11-17').map(x => x.id), PUSH = ['pk', 'pu', 'ts'];
+  check('집 A: 밀기 운동끼리 붙어 있지 않음 (파이크 → Y·T·W → 푸시업)', aIds.every((id, k) => !(PUSH.includes(id) && PUSH.includes(aIds[k + 1]))) && aIds.indexOf('pk') < aIds.indexOf('yt') && aIds.indexOf('yt') < aIds.indexOf('pu'), aIds.join(','));
+  check('집 A: 손가락 쉬는 날 운동이라 매달리는 운동 없음', getSteps('homeA', '2026-11-17').every(x => !/행잉|매달|데드행|토투바/.test(x.t)), getSteps('homeA', '2026-11-17').map(x => x.t).join(' / '));
+  scene({ '2026-11-17': { finger: 1 } }, { equip: { bar: true, db: [5] } });
+  check('손가락 아픈 주: 집 B 데드행 → 광배 스트레칭 (철봉 있어도)', /차일드 포즈/.test(getSteps('homeB', '2026-11-18').find(x => x.id === 'dh').t) && guideKeys('homeB', 'dh', '2026-11-18')[0] === 'lat_stretch');
+
+  // 템포 음성 · 연속 진행 · 영상
+  check('템포 음성: 회차 시작 "3회 내려" · 2초째부터 "둘"', tempoCue({ t: 'work', seg: 0, rep: 3, lab: '내리기' }, 0) === '3회 내려' && tempoCue({ t: 'work', seg: 0, rep: 3, lab: '내리기' }, 1) === '둘' && tempoCue({ t: 'work', seg: 2, rep: 3, lab: '올리기' }, 0) === '올려');
+  check('템포 음성: 첫 회는 좌우·묶음도 말함', tempoCue({ t: 'work', seg: 0, rep: 1, lab: '들기', part: 'Y', side: '' }, 0) === 'Y 1회 들어');
+  scene({ '2026-11-17': { session: 'homeA' } });
+  const aSt = getSteps('homeA', '2026-11-17');
+  const wc = stepRunCfg('2026-11-17', aSt[0], true), pc = stepRunCfg('2026-11-17', aSt.find(x => x.id === 'pk'), true);
+  check('연속 진행: 워밍업 5분은 5분 카운트다운 · 운동은 템포 타이머', wc && wc.work === 300 && pc && pc.kind === 'tempo' && !stepRunCfg('2026-11-17', aSt[0], false), JSON.stringify([wc && wc.work, pc && pc.kind]));
+  startChain('2026-11-17', 1);
+  const c1 = RUN.cfg.title; finishRun(false);
+  const restCfg = RUN.cfg; finishRun(false);
+  const c2 = RUN.cfg.title;
+  check('연속 진행: 운동 끝 → 그 운동 휴식(90초) → 다음 운동 자동 시작 · 끝낸 단계 완료 표시', /파이크/.test(c1) && restCfg.chainRest && restCfg.work === 90 && /Y·T·W/.test(c2) && day('2026-11-17').checks.pk === true, [c1, restCfg.work, c2].join(' → '));
+  finishRun(true); closeRunner(); ui.focus = null;
+  check('영상: 내 레벨로 바뀐 운동 이름으로 검색', videoQuery('homeA', aSt.find(x => x.id === 'pu')) === '푸시업 자세' && !/kg/.test(videoQuery('homeA', aSt.find(x => x.id === 'rc'))) && /youtube\.com\/results/.test(videoBtn('homeA', aSt[0])), videoQuery('homeA', aSt.find(x => x.id === 'rc')));
+  scene({}, { level: 0 });
+  check('영상: 입문은 무릎 푸시업으로 검색', videoQuery('homeA', getSteps('homeA', '2026-11-17').find(x => x.id === 'pu')) === '무릎 푸시업 자세');
+  check('모든 운동 가이드에 영상 검색어', Object.keys(GUIDE).every(k => GUIDE_YT[k]), Object.keys(GUIDE).filter(k => !GUIDE_YT[k]).join(','));
+
+  // 고품질 녹음 음성: 앱이 하는 모든 말이 녹음 조각으로 조립되는지 (레벨 0~10 · 기구 조합 · 집 A/B/C)
+  {
+    const fakeV = { clips: Object.fromEntries(voiceVocab().map(k => [k, [0, 0.1]])) }, said = new Set();
+    const fixed = ['준비', '시작', '매달려', '휴식', '10초 남았어요', '절반', '일시정지', '셋', '반대쪽', '전환', '완료. 수고했어요', '휴식 끝. 다시 시작하세요', '세션 완료. 수고했어요', `세트 휴식 ${durSpeak(150)}`, `라운드 휴식 ${durSpeak(240)}`];
+    fixed.forEach(t => said.add(t));
+    [{ bar: true, hangboard: true, band: true, db: [1, 2, 5] }, { bar: false, db: [5] }].forEach(eq => {
+      for (let lv = 0; lv <= 10; lv++) {
+        scene({ '2026-11-17': { session: 'homeA' } }, { level: lv, equip: eq });
+        ['homeA', 'homeB', 'homeC'].forEach(sid => {
+          const steps = getSteps(sid, '2026-11-17');
+          steps.forEach(st => {
+            said.add(`잘했어요. 휴식 ${durSpeak(st.rest ? Math.min(180, Math.max(30, st.rest)) : 20)}. 다음은 ${speakName(st.name || st.t.replace(/\s*\d+(?:~\d+)?\s*분.*$/, ''))}`);
+            const c = stepRunCfg('2026-11-17', st, true);
+            if (!c) return;
+            if (c.workLabel) said.add(c.workLabel + ' 시작');
+            if (c.kind !== 'tempo') return;
+            said.add(`준비. ${c.tempo.map(([l, d]) => `${l} ${d}초`).join(', ')}`);
+            buildPhases(c).forEach(p => {
+              if (p.t === 'work') for (let k = 0; k < p.d; k++) said.add(tempoCue(p, k));
+              else if (p.t === 'rest') said.add(p.note || '전환');
+              else if (p.t === 'setrest') said.add(`${p.set}세트 끝. 휴식 ${durSpeak(p.d)}`);
+            });
+          });
+        });
+      }
+    });
+    const miss = [...said].filter(t => !clipTokens(t, fakeV));
+    check('녹음 음성: 집 운동에서 하는 모든 말이 녹음 조각으로 조립됨', !miss.length, `${said.size}개 문장 · 빠진 것: ${miss.slice(0, 8).join(' / ')}`);
+    check('녹음 음성: "1회"가 "10회" 앞부분으로 잘못 맞지 않음', JSON.stringify(clipTokens('10회 내려', fakeV).map(x => x.key)) === '["10회","내려"]' && durSpeak(90) === '1분 30초');
+  }
+
+  // 식단 입력 줄이기: 끼니 한 번에 · 남은 끼니 전부 · 매일 고정
+  scene({ '2026-11-23': { session: 'volume' } }, { preMeal: 'no', cafeOn: true, fixedMeals: { b: [{ f: 'juice', q: 1 }, { f: 'egg', q: 3 }] } });
+  state.cafe = { '2026-11-23': [{ n: '시락국', k: 70, p: 4, u: '1인분' }, { n: '돈육간장불고기', k: 300, p: 20, u: '1인분' }] };
+  let sl = slotsFor('2026-11-23');
+  check('고정한 아침이 추천 대신 나옴 · 점심은 급식', sl.find(x => x.id === 'b').fixed && sugItems(sl.find(x => x.id === 'b').sug).some(it => it.f === 'egg' && it.q === 3) && sl.find(x => x.id === 'l').cafe);
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fill-all"]').click();
+  const fd = day('2026-11-23').food || {};
+  check('"남은 끼니 한 번에" → 추천이 있는 빈 끼니가 모두 채워짐 (기타·간식은 빈 채로)', ['b', 'l', 'i', 'a', 'd'].every(k => (fd[k] || []).length) && !(fd.o || []).length && fd.l.some(it => it.n === '돈육간장불고기'), Object.keys(fd).join(','));
+  render(); ui.openSlots = new Set(['2026-11-23:d']);
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fix"][data-slot="d"]').click();
+  check('"매일 이대로" → 그 끼니 구성이 고정으로 저장', fixedMeals().d && sameItems(fixedMeals().d, day('2026-11-23').food.d));
+  ui.focus = null; ui.openSlots = new Set();
+
+  // 한 끼 밥 양 직접 정하기
+  scene({ '2026-11-23': { session: 'volume' } }, { riceBowl: 2 / 3, cafeOn: true });
+  state.cafe = { '2026-11-23': [{ n: '밥 (급식)', k: 310, p: 5.5, u: '1공기', rice: true }, { n: '돈육간장불고기', k: 300, p: 20 }] };
+  check('밥 양을 정하면 저녁 추천은 밥이 따로 붙는 메뉴만', Array.from({ length: 14 }, (_, i) => PLAN.dinners[dinnerDefault(addDays('2026-11-23', i))].rice).every(Boolean));
+  check('밥 ⅔공기로 정하면 점심 급식·저녁 추천 모두 ⅔공기', Math.abs(riceQty('2026-11-23') - 2 / 3) < 0.01 && Math.abs(cafeItems('2026-11-23').find(x => /^밥/.test(x.n)).q - 2 / 3) < 0.01 && /밥 ⅔공기 기준/.test(cafeDayLine('2026-11-23', state.cafe['2026-11-23'])));
+
+  // 설정 접기·순서 · 되돌리기
+  scene({}, { sex: 'm', age: 39, heightCm: 167, startWeight: 65 });
+  ui.tab = 'settings'; render();
+  const titles = [...document.querySelectorAll('#main > section.card .card-h h2')].map(h => h.textContent.trim());
+  check('설정: 식단 목표가 맨 위, 모든 카드가 접힘', titles[0] === '식단 목표' && [...document.querySelectorAll('#main > section.card')].every(c => c.classList.contains('folded')), titles.slice(0, 4).join(' / '));
+  document.querySelector('[data-act="set-fold"][data-k="식단 목표"]').click();
+  check('설정: 제목을 누르면 펼쳐지고 기억함', !document.querySelector('#main > section.card').classList.contains('folded') && state.meta.setOpen['식단 목표'] === true);
+  ui.tab = 'today';
+  scene({ '2026-11-23': { session: 'volume' } }, { preMeal: 'no' });
+  document.getElementById('main').innerHTML = dietCard('2026-11-23');
+  document.querySelector('[data-act="f-fill-all"]').click();
+  const filled = Object.keys(day('2026-11-23').food || {}).length;
+  const undoBtn = document.querySelector('#toast .toast-act');
+  if (undoBtn) undoBtn.click();
+  check('"한 번에 기록" 뒤 되돌리기 → 기록 전으로', filled >= 4 && undoBtn && !Object.keys(day('2026-11-23').food || {}).length, filled);
+
+  // 공기밥 −/+: ⅓ · ½ · ⅔ · 1 · 1⅓ · 1½ · 2
+  {
+    const cafeRice = { n: '밥 (급식)', k: 310, p: 5.5, u: '1공기', q: 2 / 3 }, dbRice = { f: 'rice', q: 1 }, egg = { f: 'egg', q: 2 };
+    const up = stepQty(cafeRice, 1), down = stepQty(cafeRice, -1);
+    check('공기밥 ⅔에서 + → 1공기, − → ½공기 · DB 밥 1 − → ⅔ · 계란은 0.5 단위 · ⅓에서 − → 빼기', Math.abs(up - 1) < 0.01 && Math.abs(down - 0.5) < 0.01 && Math.abs(stepQty(dbRice, -1) - 2 / 3) < 0.01 && stepQty(egg, 1) === 2.5 && stepQty({ f: 'rice', q: 1 / 3 }, -1) === 0 && qtyText(stepQty(cafeRice, 1)) === '1', [qtyText(up), qtyText(down)].join(' / '));
+  }
+
+  // 남은 단백질 채우기 · 몸 상태 이상 없음
+  {
+    const td = todayStr();
+    // 아침만 주스로 먹고 나머지는 다 기록: 추천을 더해도 모자람
+    scene({ [td]: { session: 'volume', food: { b: [{ f: 'juice', q: 1 }], l: [{ f: 'rice', q: 1 }], i: [{ f: 'sportsdrink', q: 1 }], a: [{ f: 'banana', q: 1 }], d: [{ f: 'rice', q: 1 }, { f: 'kimchi', q: 1 }] } } }, { sex: 'm', age: 39, heightCm: 167, startWeight: 65, goal: 'cut', preMeal: 'no' });
+    document.getElementById('main').innerHTML = dietCard(td);
+    const chips = [...document.querySelectorAll('[data-act="f-pgap"]')];
+    check('단백질이 모자라면 남은 칼로리 안의 고단백 간식 추천 (단백질 음료 먼저)', chips.length >= 2 && chips[0].dataset.f === 'protein', chips.map(c => c.dataset.f).join(','));
+    scene({ [td]: { session: 'volume', food: { b: [{ f: 'juice', q: 1 }, { f: 'egg', q: 2 }] } } }, { sex: 'm', age: 39, heightCm: 167, startWeight: 65, goal: 'cut', preMeal: 'no' });
+    document.getElementById('main').innerHTML = dietCard(td);
+    check('남은 끼니를 추천대로 먹으면 채워지는 날은 간식 추천 안 함', !document.querySelector('[data-act="f-pgap"]'));
+    scene({ [td]: { session: 'volume', food: { b: [{ f: 'juice', q: 1 }], l: [{ f: 'rice', q: 1 }], i: [{ f: 'sportsdrink', q: 1 }], a: [{ f: 'banana', q: 1 }], d: [{ f: 'rice', q: 1 }, { f: 'kimchi', q: 1 }] } } }, { sex: 'm', age: 39, heightCm: 167, startWeight: 65, goal: 'cut', preMeal: 'no' });
+    document.getElementById('main').innerHTML = dietCard(td);
+    document.querySelector('[data-act="f-pgap"]').click();
+    check('추천을 누르면 기타·간식에 기록', (day(td).food.o || []).some(it => it.f === 'protein'));
+    scene({ [td]: { finger: 2, weak: true } });
+    ui.tab = 'today'; render();
+    document.querySelector('[data-act="body-ok"]').click();
+    check('"이상 없음" → 통증 기록 지움 · 리포트에 이상 없음', day(td).ok && !day(td).finger && !day(td).weak && bodyBits(day(td))[0] === '이상 없음');
+    document.querySelector('[data-act="flag"][data-k="finger"]').click();
+    check('아픈 데를 고르면 "이상 없음" 해제', !day(td).ok && lvOf(day(td).finger) === 1);
+    check('리포트: 몸 상태 기록 일수', /몸 상태 기록 1\/7일/.test(buildReport(mondayOf(td))));
+  }
+
+  // 컨디션 칸과 추천이 어긋나지 않게 · 목표 체중 안전 점검 · 기록이 적을 때 판정 보류
+  {
+    const wife = { '2026-11-22': { session: 'homeA', dur: 30, rpe: 6 }, '2026-11-23': { session: 'limit', dur: 125, rpe: 7, sore: 1 } };
+    scene(wife, { sex: 'f', age: 33, heightCm: 153, startWeight: 44, targetWeight: 41, goal: 'cut', level: 3, track: 'ret', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    const rd = readiness('2026-11-24'), ra = readyAdvice('2026-11-24', rd);
+    check('한계 다음 날: 점수가 좋아도 "고강도 OK"라고 하지 않음 (추천은 휴식)', !/고강도 OK/.test(ra.t) && /48시간/.test(ra.why) && !recommend('2026-11-24').canHigh, `${rd.score}점 · ${ra.t} · ${ra.why}`);
+    const gr = goalRisk() || [];
+    check('목표 체중 점검: 153cm 41kg은 저체중 · 주 1kg은 빠름', gr.some(t => /저체중/.test(t)) && gr.some(t => /빠릅니다/.test(t)), gr.join(' / '));
+    vd = verdict('2026-11-23');
+    check('주간 판정에 체중 목표 경고 · 기록 적으면 "조정 없음" 대신 판정 보류', vd.cards.some(c => c.t === '체중 목표 점검 필요') && !vd.cards.some(c => c.t === '조정 없음'));
+    scene({}, { sex: 'm', heightCm: 167, startWeight: 65.5, targetWeight: 63, goal: 'cut', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    check('남편 목표(167cm 65.5→63kg, 주 0.65kg)는 경고 없음', !goalRisk());
+    scene({ '2026-11-24': { weight: 65 } }, { sex: 'm', heightCm: 167, startWeight: 65.5, targetWeight: 63, goal: 'cut', startDate: '2026-11-16', targetDate: '2026-12-13' });
+    check('기록이 거의 없으면 "판정할 기록이 아직 적어요"', verdict('2026-11-23').cards.some(c => /판정할 기록이 아직 적어요/.test(c.t)));
+  }
+
   // 버그 수정·새 기능 확인
   check('손상된 백업 거부 (days가 null·배열, 전체가 배열)', normalize({ days: null }) === null && normalize({ days: [] }) === null && normalize([]) === null);
   const dz = parseIngredients('밥 1/0공기');
@@ -219,7 +361,7 @@
   ui.focus = null; renderFocus();
   check('운동 방법 연결: 외회전·회내회외·집 C 행보드', guideKeys('homeA', 'er').length === 1 && guideKeys('homeA', 'pr').length === 1 && guideKeys('homeC', 'h')[0] === 'hangboard' && Object.values(STEP_GUIDE).flat().every(k => !!GUIDE[k]));
   scene({}, { equip: { bar: false, db: [5] } });
-  check('철봉 없어 대체된 단계는 원래 운동 설명 숨김', guideKeys('homeA', 'll').length === 0 && guideKeys('homeA', 'pu').length === 1);
+  check('철봉 없어 대체된 단계는 원래 운동 설명 숨김', guideKeys('homeC', 'll').length === 0 && guideKeys('homeA', 'pu').length === 1);
   scene({});
   state.outdoor = [{ id: 'o1', date: '2026-11-01', v: 7, area: '내원사', name: '테스트', tries: 3, style: 'project', note: '' }];
   check('프로젝트는 완등 등급에 미반영 · 완등 버튼 표시', sendLevel('2026-11-16').outdoor == null && /data-act="ou-send"/.test(outdoorView()));

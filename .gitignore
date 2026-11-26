@@ -1,2 +1,4 @@
 .claude/
 *.log
+.voice-cache/
+__pycache__/
