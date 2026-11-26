@@ -204,7 +204,9 @@ def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
     with wave.open(buf, 'wb') as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes())
     mp3 = os.path.join(OUT, voice['id'] + '.mp3')
-    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'wav', '-i', '-', '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '96k', mp3],
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'wav', '-i', '-', '-ac', '1',
+                    # '치·지·시' 같은 바람 소리가 mp3에서 쇳소리로 변하지 않게 4.5kHz 이상을 6dB 낮추고 9.5kHz 위는 자름 (말 알아듣기엔 영향 없음)
+                    '-af', 'highshelf=f=4500:g=-6,lowpass=f=9500', '-codec:a', 'libmp3lame', '-b:a', '96k', mp3],
                    input=buf.getvalue(), check=True)
     return {'label': voice['label'], 'desc': voice['desc'], 'file': voice['id'] + '.mp3', 'mark': MARK_AT, 'clips': clips}
 
@@ -215,6 +217,7 @@ def main():
     ap.add_argument('--engine', choices=['gemini', 'cloud'], default='gemini')
     ap.add_argument('--resplit', action='store_true', help='받아 둔 Gemini 녹음으로 다시 짝 맞추기만 (TTS 호출 없음)')
     ap.add_argument('--fill', action='store_true', help='짝을 못 찾은 줄만 모아 TTS를 1번 더 호출해 채우기')
+    ap.add_argument('--drop', help='묶음에서 뺄 목소리 id (쉼표로 여러 개)')
     ap.add_argument('--soft', action='store_true', help='초 세기(하나·둘…)만 부드럽게 다시 녹음 (TTS 호출 1번)')
     ap.add_argument('--fake', action='store_true')
     a = ap.parse_args()
@@ -227,6 +230,12 @@ def main():
             continue
         print(f"{v['id']} · {len(phrases)}개", file=sys.stderr)
         man['voices'][v['id']] = build(v, phrases, a.fake, a.engine, a.resplit, a.fill, a.soft)
+    for d in (a.drop or '').split(','):
+        if d and man['voices'].pop(d, None):
+            fp = os.path.join(OUT, d + '.mp3')
+            if os.path.exists(fp):
+                os.remove(fp)
+            print(f'{d}: 묶음에서 뺌', file=sys.stderr)
     man['voices'] = {k: man['voices'][k] for k in [v['id'] for v in VOICES] if k in man['voices']}  # 고르는 순서 고정
     man['version'] = hashlib.sha1(json.dumps(man, sort_keys=True).encode()).hexdigest()[:8]
     with open(man_fp, 'w') as f:
