@@ -45,6 +45,18 @@ SOFT_STYLE = '차분하고 또렷하게, 숫자는 힘을 빼고 부드럽게'
 SOFT_WORDS = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열'] + [f'{i}회' for i in range(1, 21)] + [
     '내려', '멈춤', '올려', '들어', '올라가', '내려가', '일어나', '숙여', '다시 올라가', '돌아와', '당겨', '풀어', '어깨 내려',
     '안쪽', '바깥', '위로', '아래로', '왼쪽', '오른쪽', '왼다리', '오른다리', '왼손', '오른손', '준비', '시작', '휴식']
+def short_takes(phrases):
+    """모든 말을 50~60줄짜리 짧은 목록 여러 개로 나눔 (긴 목록은 건너뛰기·쇳소리가 늘어서)"""
+    tempo = [p for p in SOFT_WORDS if p in phrases]
+    cue_re = r'^(\d+(초|분|세트|회)|.*(기|하기)$|잘했어요|다음은|세트|라운드|끝|반대쪽|전환|절반|매달려|일시정지|10초 남았어요|.*\.\s.*)$'
+    import re
+    rest = [p for p in phrases if p not in tempo]
+    cues = [p for p in rest if re.match(cue_re, p) and len(p) <= 16]
+    names = [p for p in rest if p not in cues]
+    half = (len(names) + 1) // 2
+    return [('tempo', tempo), ('cues', cues), ('names1', names[:half]), ('names2', names[half:])]
+
+
 # 빠진 줄을 다시 읽힐 때만 쓰는 발음 (전체 녹음의 캐시가 바뀌지 않게 SAY와 따로)
 FILL_SAY = {'록오프': '락 오프'}
 MARK_AT = 0.30   # 파일 맨 앞 기준 신호 위치(초). 앱이 이 신호를 찾아 mp3 앞 지연을 보정
@@ -103,6 +115,8 @@ def gemini_record(voice, texts, tag, resplit):
         if not key:
             raise SystemExit('GEMINI_API_KEY 환경 변수가 필요합니다')
         style = SOFT_STYLE if tag == 'tempo' else voice['style']
+        if tag.startswith('names'):
+            style += ', 운동 이름이니 또박또박'
         prompt = (f"운동 코치 목소리로 {style}, 아래 줄을 위에서부터 한 줄씩 빠짐없이 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요. "
                   "숫자를 세는 줄(하나, 둘, 셋…)은 힘을 빼고 부드럽게, 리듬을 타듯 가볍게 읽어 주세요:\n\n"
                   + '\n\n'.join(texts))
@@ -148,13 +162,15 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
         for p, (a, b) in fpick.items():
             if not shaky(ft[fphr.index(p)]):
                 out.setdefault(p, cut(fpcm, a, b))
-    # 초 세기를 부드럽게 다시 받은 녹음 (--soft): 있으면 전체 녹음보다 우선
-    soft_list = [p for p in SOFT_WORDS if p in phrases]
-    spcm, sfp = gemini_record(voice, soft_list, 'tempo', resplit or not soft)
-    if spcm is not None:
-        spick, _ = align_voice.align(spcm, soft_list, soft_list, key, sfp[:-4] + '.heard2.json')
-        for p, (a, b) in spick.items():
-            out[p] = cut(spcm, a, b)
+    # 짧은 녹음들(--soft로 받음): 있으면 긴 전체 녹음보다 우선. 긴 녹음은 뒤로 갈수록 쇳소리가 섞여서
+    #   tempo: 템포에서 매초 나오는 말 · cues: 안내 문장·구간 이름·시간 · names1/2: 운동 이름
+    for tag, words in short_takes(phrases):
+        tpcm, tfp = gemini_record(voice, [speak_text(p) for p in words], tag, resplit or not soft)
+        if tpcm is None:
+            continue
+        tpick, _ = align_voice.align(tpcm, words, [speak_text(p) for p in words], key, tfp[:-4] + '.heard2.json')
+        for p, (a, b) in tpick.items():
+            out[p] = cut(tpcm, a, b)
     miss = [p for p in phrases if p not in out]
     if fill and miss:
         if resplit:
@@ -177,6 +193,36 @@ def fake(phrase):
     return array.array('h', (int(8000 * math.sin(2 * math.pi * f * i / SR)) for i in range(n)))
 
 
+def deess(pcm):
+    """'ㅅ·ㅊ·ㅎ' 같은 바람 소리가 나는 순간만 3.5kHz 위를 크게(최대 약 14dB) 줄이고, 7kHz 위는 늘 줄임.
+    신경망 음성은 이 바람 소리를 금속성으로 떨리게 만들기 쉬워서(쇳소리), 모음 등 나머지는 그대로 두고 그 순간만 누름"""
+    try:
+        import numpy as np
+    except ImportError:
+        return pcm
+    x = np.asarray(pcm, dtype=float)
+    n, hop = 512, 128
+    if len(x) < n:
+        return pcm
+    win = np.hanning(n)
+    pad = np.concatenate([np.zeros(n), x, np.zeros(n)])
+    f = np.fft.rfftfreq(n, 1 / SR)
+    out = np.zeros_like(pad); norm = np.zeros_like(pad)
+    hi, top = f >= 3500, f >= 7000
+    for i in range(0, len(pad) - n, hop):
+        spec = np.fft.rfft(pad[i:i + n] * win)
+        e = np.abs(spec) ** 2
+        ratio = e[f >= 4000].sum() / (e.sum() + 1e-9)
+        g = np.ones_like(f)
+        cut = min(1.0, max(0.0, (ratio - 0.25) / 0.35))  # 바람 소리가 셀수록 더 줄임
+        g[hi] = 1 - 0.8 * cut
+        g[top] *= 0.2
+        out[i:i + n] += np.fft.irfft(spec * g, n) * win
+        norm[i:i + n] += win ** 2
+    y = out[n:n + len(x)] / np.maximum(norm[n:n + len(x)], 1e-6)
+    return array.array('h', np.clip(y, -32767, 32767).astype(np.int16).tobytes())
+
+
 def trim(pcm, thr=500):
     """앞뒤 무음 자르기 (PAD만큼 여유)"""
     idx = [i for i in range(0, len(pcm), 48) if abs(pcm[i]) > thr]
@@ -197,6 +243,8 @@ def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
         if batch is not None and p not in batch:
             continue  # 녹음에서 못 찾은 말: 묶음에서 빼면 앱이 그 문장만 폰 음성으로 읽음
         c = trim(fake(p) if use_fake else batch[p] if batch is not None else cloud_synth(voice, p))
+        if not use_fake:
+            c = deess(c)
         clips[p] = [round(len(pcm) / SR, 4), round(len(c) / SR, 4)]
         pcm.extend(c)
         pcm.extend(sil(GAP))
@@ -205,8 +253,8 @@ def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes())
     mp3 = os.path.join(OUT, voice['id'] + '.mp3')
     subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'wav', '-i', '-', '-ac', '1',
-                    # '치·지·시' 같은 바람 소리가 mp3에서 쇳소리로 변하지 않게 4.5kHz 이상을 6dB 낮추고 9.5kHz 위는 자름 (말 알아듣기엔 영향 없음)
-                    '-af', 'highshelf=f=4500:g=-6,lowpass=f=9500', '-codec:a', 'libmp3lame', '-b:a', '96k', mp3],
+                    # 바람 소리는 deess()에서 이미 눌렀고, 7.5kHz 위만 잘라 mp3가 높은 대역에 비트를 쓰지 않게
+                    '-af', 'lowpass=f=7500', '-codec:a', 'libmp3lame', '-b:a', '112k', mp3],
                    input=buf.getvalue(), check=True)
     return {'label': voice['label'], 'desc': voice['desc'], 'file': voice['id'] + '.mp3', 'mark': MARK_AT, 'clips': clips}
 
