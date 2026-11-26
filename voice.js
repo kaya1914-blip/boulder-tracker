@@ -61,6 +61,9 @@ function clipTokens(text, v) {
     if (m) { gap = /[.!?]/.test(m[0]) ? 0.25 : /,/.test(m[0]) ? 0.15 : 0.06; s = s.slice(m[0].length); if (!s) break; }
     const k = keys.find(x => s.startsWith(x) && (s.length === x.length || /[\s.,!?~]/.test(s[x.length])));
     if (!k) return null; // 묶음에 없는 말 → 폰 음성으로
+    // "1분 30초"처럼 숫자+단위가 이어지면 한 덩어리로 들리게 간격을 좁힘
+    const unit = /^\d+(분|초)$/, prev = out.length && out[out.length - 1].key;
+    if (prev && unit.test(prev) && unit.test(k) && gap < 0.1) gap = 0.015;
     out.push({ key: k, gap: out.length ? gap : 0 });
     s = s.slice(k.length); gap = 0;
   }

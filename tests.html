@@ -249,6 +249,7 @@
     });
     const miss = [...said].filter(t => !clipTokens(t, fakeV));
     check('녹음 음성: 집 운동에서 하는 모든 말이 녹음 조각으로 조립됨', !miss.length, `${said.size}개 문장 · 빠진 것: ${miss.slice(0, 8).join(' / ')}`);
+    check('녹음 음성: "1분 30초"는 간격을 좁혀 이어 붙임', clipTokens('휴식 1분 30초', fakeV)[2].gap < 0.03 && clipTokens('휴식 1분 30초', fakeV)[1].gap >= 0.05);
     check('녹음 음성: "1회"가 "10회" 앞부분으로 잘못 맞지 않음', JSON.stringify(clipTokens('10회 내려', fakeV).map(x => x.key)) === '["10회","내려"]' && durSpeak(90) === '1분 30초');
   }
 

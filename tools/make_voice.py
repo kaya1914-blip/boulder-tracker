@@ -151,6 +151,7 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
     shaky = lambda t: any(k in t for k in FILL_SAY)
     pick, miss = align_voice.align(pcm, phrases, texts, key, fp[:-4] + '.heard2.json')
     out = {p: cut(pcm, a, b) for p, (a, b) in pick.items() if not shaky(speak_text(p))}
+    src = {p: 'main' for p in out}  # 말마다 어느 녹음에서 왔는지
     # 예전에 받아 둔 '빠진 줄' 녹음들
     import glob
     for ffp in sorted(glob.glob(os.path.join(CACHE, f"gemini_{voice['id']}_fill*.pcm"))):
@@ -162,18 +163,24 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
         fpcm = match_pitch(array.array('h', open(ffp, 'rb').read()), os.path.basename(ffp))
         fpick, _ = align_voice.align(fpcm, fphr, ft, key, ffp[:-4] + '.heard2.json')
         for p, (a, b) in fpick.items():
-            if not shaky(ft[fphr.index(p)]):
-                out.setdefault(p, cut(fpcm, a, b))
+            if not shaky(ft[fphr.index(p)]) and src.get(p) in (None, 'main'):
+                out[p] = cut(fpcm, a, b); src[p] = 'fill'  # 짧은 '빠진 줄' 녹음이 긴 녹음보다 깨끗
     # 짧은 녹음들(--soft로 받음): 있으면 긴 전체 녹음보다 우선. 긴 녹음은 뒤로 갈수록 쇳소리가 섞여서
     #   tempo: 템포에서 매초 나오는 말 · cues: 안내 문장·구간 이름·시간 · names1/2: 운동 이름
-    for tag, words in short_takes(phrases):
-        tpcm, tfp = gemini_record(voice, [speak_text(p) for p in words], tag, resplit or not soft)
+    def take(tag, words, say):
+        tpcm, tfp = gemini_record(voice, [say(p) for p in words], tag, resplit or not soft)
         if tpcm is None:
-            continue
+            return
         tpcm = match_pitch(tpcm, tag)
-        tpick, _ = align_voice.align(tpcm, words, [speak_text(p) for p in words], key, tfp[:-4] + '.heard2.json')
+        tpick, _ = align_voice.align(tpcm, words, [say(p) for p in words], key, tfp[:-4] + '.heard2.json')
         for p, (a, b) in tpick.items():
-            out[p] = cut(tpcm, a, b)
+            out[p] = cut(tpcm, a, b); src[p] = tag
+    for tag, words in short_takes(phrases):
+        take(tag, words, speak_text)
+    # 짧은 녹음에서 못 찾아 아직 긴 녹음에서 오는 말 + 빠진 말 → 마지막 짧은 녹음 하나로 (--soft, 호출 1번)
+    extra = [p for p in phrases if src.get(p, 'main') == 'main']
+    if extra:
+        take('extra', extra, fill_text)
     miss = [p for p in phrases if p not in out]
     if fill and miss:
         if resplit:
@@ -183,8 +190,11 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
             fpcm, ffp = gemini_record(voice, ftexts, 'fill', False)
             fpick, _ = align_voice.align(fpcm, miss, ftexts, key, ffp[:-4] + '.heard2.json')
             for p, (a, b) in fpick.items():
-                out.setdefault(p, cut(fpcm, a, b))
+                if p not in out:
+                    out[p] = cut(fpcm, a, b); src[p] = 'fill'
     left = [p for p in phrases if p not in out]
+    from collections import Counter
+    print(f"  {voice['id']}: 녹음별 조각 수 {dict(Counter(src[p] for p in out))}", file=sys.stderr)
     print(f"  {voice['id']}: 최종 {len(out)}/{len(phrases)}개" + (f" · 아직 빠짐 {len(left)}: {', '.join(left)}" if left else ''), file=sys.stderr)
     return out
 
