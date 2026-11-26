@@ -113,6 +113,9 @@ def _ask(part_pcm, key):
                 raise
             except (KeyError, json.JSONDecodeError):
                 break  # 답이 비었거나 JSON이 아님 → 다음 모델
+            except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+                print(f"  받아 적기 연결 끊김 ({type(e).__name__}) · 30초 뒤 다시", file=sys.stderr)
+                time.sleep(30); continue  # 연결이 끊기면 같은 모델로 다시
     raise SystemExit('받아 적기 모델 무료 한도를 모두 썼습니다 · 내일 --resplit으로 이어서 하면 됩니다')
 
 
