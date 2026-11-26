@@ -166,7 +166,7 @@ function voiceSettings() {
   if (mode === 'clip') {
     const vs = clipVoices();
     body = vs.length
-      ? `${seg('clipVoice', vs.map(([id, v]) => [id, v.label]), curClipVoice())}<p class="hint">${esc((VC.manifest.voices[curClipVoice()] || {}).desc || '')} · 녹음 음성은 폰 무음 스위치와 상관없이 미디어 음량으로 나옵니다.</p>`
+      ? `${vs.length > 1 ? seg('clipVoice', vs.map(([id, v]) => [id, v.label]), curClipVoice()) : ''}<p class="hint">${esc((VC.manifest.voices[curClipVoice()] || {}).desc || '')} · 녹음 음성은 폰 무음 스위치와 상관없이 미디어 음량으로 나옵니다.</p>`
       : '<p class="hint">녹음 음성 파일이 아직 없어 폰 음성으로 안내합니다.</p>';
   } else {
     const vs = koVoices().sort((a, b) => voiceScore(b) - voiceScore(a)), cur = deviceVoice();

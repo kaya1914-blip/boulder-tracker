@@ -39,8 +39,12 @@ SAY = {
     '엎드려 Y·T·W 레이즈': '엎드려 와이 티 더블유 레이즈',
 }
 # 초 세기(하나·둘·셋…)만 따로 다시 녹음할 때의 분위기 (--soft). 이 녹음이 전체 녹음보다 우선
-SOFT_STYLE = '힘을 빼고 아주 부드럽게, 숨 쉬듯 리듬을 타며 숫자를 세듯이'
-SOFT_WORDS = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물']
+# 템포에서 매초 나오는 말(초 세기·회차·구간 이름)은 짧은 목록으로 따로 다시 녹음(--soft, 호출 1번)해서 전체 녹음보다 우선.
+# 10분짜리 한 번 녹음은 뒤로 갈수록 쇳소리 같은 잡음이 섞여서, 가장 자주 듣는 말은 짧고 깨끗한 녹음으로
+SOFT_STYLE = '차분하고 또렷하게, 숫자는 힘을 빼고 부드럽게'
+SOFT_WORDS = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열'] + [f'{i}회' for i in range(1, 21)] + [
+    '내려', '멈춤', '올려', '들어', '올라가', '내려가', '일어나', '숙여', '다시 올라가', '돌아와', '당겨', '풀어', '어깨 내려',
+    '안쪽', '바깥', '위로', '아래로', '왼쪽', '오른쪽', '왼다리', '오른다리', '왼손', '오른손', '준비', '시작', '휴식']
 # 빠진 줄을 다시 읽힐 때만 쓰는 발음 (전체 녹음의 캐시가 바뀌지 않게 SAY와 따로)
 FILL_SAY = {'록오프': '락 오프'}
 MARK_AT = 0.30   # 파일 맨 앞 기준 신호 위치(초). 앱이 이 신호를 찾아 mp3 앞 지연을 보정
@@ -98,7 +102,7 @@ def gemini_record(voice, texts, tag, resplit):
         key = os.environ.get('GEMINI_API_KEY')
         if not key:
             raise SystemExit('GEMINI_API_KEY 환경 변수가 필요합니다')
-        style = SOFT_STYLE if tag == 'soft' else voice['style']
+        style = SOFT_STYLE if tag == 'tempo' else voice['style']
         prompt = (f"운동 코치 목소리로 {style}, 아래 줄을 위에서부터 한 줄씩 빠짐없이 한 번만 읽고 줄 사이마다 2초씩 쉬어 주세요. "
                   "숫자를 세는 줄(하나, 둘, 셋…)은 힘을 빼고 부드럽게, 리듬을 타듯 가볍게 읽어 주세요:\n\n"
                   + '\n\n'.join(texts))
@@ -146,7 +150,7 @@ def gemini_batch(voice, phrases, resplit=False, fill=False, soft=False):
                 out.setdefault(p, cut(fpcm, a, b))
     # 초 세기를 부드럽게 다시 받은 녹음 (--soft): 있으면 전체 녹음보다 우선
     soft_list = [p for p in SOFT_WORDS if p in phrases]
-    spcm, sfp = gemini_record(voice, soft_list, 'soft', resplit or not soft)
+    spcm, sfp = gemini_record(voice, soft_list, 'tempo', resplit or not soft)
     if spcm is not None:
         spick, _ = align_voice.align(spcm, soft_list, soft_list, key, sfp[:-4] + '.heard2.json')
         for p, (a, b) in spick.items():
@@ -200,7 +204,7 @@ def build(voice, phrases, use_fake, engine, resplit, fill=False, soft=False):
     with wave.open(buf, 'wb') as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes())
     mp3 = os.path.join(OUT, voice['id'] + '.mp3')
-    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'wav', '-i', '-', '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '64k', mp3],
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'wav', '-i', '-', '-ac', '1', '-codec:a', 'libmp3lame', '-b:a', '96k', mp3],
                    input=buf.getvalue(), check=True)
     return {'label': voice['label'], 'desc': voice['desc'], 'file': voice['id'] + '.mp3', 'mark': MARK_AT, 'clips': clips}
 
