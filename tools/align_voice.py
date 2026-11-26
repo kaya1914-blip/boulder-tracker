@@ -9,7 +9,10 @@ Gemini TTS는 긴 목록을 읽을 때 줄을 건너뛰거나, 한 줄을 두 �
 import array, base64, io, json, math, os, re, subprocess, sys, time, urllib.request, wave
 
 SR = 24000
-MODEL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
+# 받아 적기 모델: 무료 한도가 차면(429) 다음 모델로. 모델마다 한도가 따로
+MODELS = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite']
+MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent'
+_dead = set()  # 오늘 한도가 찬 모델
 DIG = '영일이삼사오육칠팔구'
 NATIVE = ['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물']
 
@@ -86,18 +89,31 @@ def _ask(part_pcm, key):
     prompt = (f"이 오디오에는 '삐' 소리가 {n}번 나오고, 삐 소리마다 바로 뒤에 짧은 한국어 말(운동 안내)이 하나씩 나옵니다. "
               f"삐 소리 순서대로 들린 말을 그대로 받아 적어 JSON 문자열 배열 하나로만 답하세요. 항목은 정확히 {n}개. "
               "말이 소리 일부만 있으면 들린 부분만, 안 들리면 빈 문자열.")
-    body = {'contents': [{'role': 'user', 'parts': [{'inlineData': {'mimeType': 'audio/mp3', 'data': base64.b64encode(mp3).decode()}}, {'text': prompt}]}],
-            'generationConfig': {'responseMimeType': 'application/json', 'temperature': 0}}
-    for attempt in range(5):
-        try:
-            r = urllib.request.Request(MODEL, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', 'x-goog-api-key': key})
-            d = json.load(urllib.request.urlopen(r, timeout=300))
-            return json.loads(d['candidates'][0]['content']['parts'][0]['text'])
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 503) and attempt < 4:
-                time.sleep(30)
-                continue
-            raise
+    for m in MODELS:
+        if m in _dead:
+            continue
+        cfg = {'responseMimeType': 'application/json', 'temperature': 0}
+        if m == 'gemini-flash-latest':
+            cfg['thinkingConfig'] = {'thinkingLevel': 'low'}
+        body = {'contents': [{'role': 'user', 'parts': [{'inlineData': {'mimeType': 'audio/mp3', 'data': base64.b64encode(mp3).decode()}}, {'text': prompt}]}],
+                'generationConfig': cfg}
+        for attempt in range(3):
+            try:
+                r = urllib.request.Request(MODEL_URL.format(m), data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', 'x-goog-api-key': key})
+                d = json.load(urllib.request.urlopen(r, timeout=300))
+                return json.loads(d['candidates'][0]['content']['parts'][0]['text'])
+            except urllib.error.HTTPError as e:
+                msg = e.read()[:300].decode('utf-8', 'ignore')
+                if e.code == 429 and ('PerDay' in msg or 'per day' in msg.lower() or attempt == 2):
+                    print(f"  받아 적기 모델 {m}: 한도 참 → 다음 모델", file=sys.stderr); _dead.add(m); break
+                if e.code in (429, 500, 503):
+                    time.sleep(30); continue
+                if e.code == 404:
+                    _dead.add(m); break
+                raise
+            except (KeyError, json.JSONDecodeError):
+                break  # 답이 비었거나 JSON이 아님 → 다음 모델
+    raise SystemExit('받아 적기 모델 무료 한도를 모두 썼습니다 · 내일 --resplit으로 이어서 하면 됩니다')
 
 
 def transcribe(pcm, regions, key, cache_fp):
